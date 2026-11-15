@@ -95,9 +95,21 @@ export function repairToolArguments(args: unknown, toolName?: string): JsonObjec
     return {};
   }
 
-  if (isRecord(record.original)) record = { ...record.original };
-  if (isRecord(record.input)) record = { ...record.input };
-  if (isRecord(record.parameters)) record = { ...record.parameters };
+  // Models sometimes wrap the real arguments in an `original`/`input`/`parameters`
+  // field, either as an object or as a JSON string. Unwrap repeatedly (bounded)
+  // so `{original:{input:"{\"path\":...}"}}` still reaches the tool intact.
+  for (let depth = 0; depth < 4; depth++) {
+    let unwrapped = false;
+    for (const key of ["original", "input", "parameters"] as const) {
+      const wrapped = record[key];
+      const candidate = isRecord(wrapped) ? wrapped : typeof wrapped === "string" ? safeParseJson(wrapped) : undefined;
+      if (!isRecord(candidate)) continue;
+      record = { ...candidate };
+      unwrapped = true;
+      break;
+    }
+    if (!unwrapped) break;
+  }
 
   const repaired: Record<string, unknown> = {};
 
@@ -369,11 +381,18 @@ export function buildRequest(
     system = context.systemPrompt;
   }
 
-  // 2. Track tool names from assistant tool calls for tool results
+  // 2. Track tool names from assistant tool calls for tool results, and the
+  // call ids that already have a result anywhere in the history.
   const toolNames = new Map<string, string>();
+  const answeredCalls = new Set<string>();
   const messages = context.messages ?? [];
   for (const message of messages) {
-    if (message.role !== "assistant") continue;
+    const rec = message as unknown as Record<string, unknown>;
+    const resultId = message.toolCallId ?? rec.tool_call_id ?? rec.id;
+    if (message.role !== "assistant") {
+      if (resultId) answeredCalls.add(sanitizeToolCallId(String(resultId)));
+      continue;
+    }
     if (Array.isArray(message.content)) {
       for (const block of message.content) {
         if (!block || typeof block !== "object") continue;
@@ -403,9 +422,35 @@ export function buildRequest(
         if (text) system += (system ? "\n\n" : "") + text;
         break;
       }
-      case "assistant":
-        wireMessages.push(serializeAssistant(message));
+      case "assistant": {
+        const turn = serializeAssistant(message);
+        wireMessages.push(turn);
+        // The gateway rejects the whole request with "Tool results are missing
+        // for tool calls ..." when an assistant turn has a call without a
+        // result (aborted turn, dropped/compacted result). Record a synthetic
+        // error result so the session stays usable instead of wedging.
+        const parts = Array.isArray(turn.content) ? (turn.content as Array<Record<string, unknown>>) : [];
+        for (const part of parts) {
+          if (part.type !== "tool-call") continue;
+          const callId = String(part.toolCallId ?? "");
+          if (!callId || answeredCalls.has(callId)) continue;
+          wireMessages.push({
+            role: "tool",
+            content: [
+              {
+                type: "tool-result",
+                toolCallId: callId,
+                toolName: String(part.toolName ?? "unknown"),
+                output: {
+                  type: "error-text",
+                  value: "Tool execution was interrupted before a result was recorded.",
+                },
+              },
+            ],
+          });
+        }
         break;
+      }
       case "tool":
       case "toolResult":
       case "tool_result": {

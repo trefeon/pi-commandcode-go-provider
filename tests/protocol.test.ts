@@ -48,6 +48,19 @@ describe("protocol", () => {
       expect(repaired.i).toContain("Listing root directory to understand project structure");
     });
 
+    test("repairToolArguments unwraps nested string argument wrappers", () => {
+      const edit = repairToolArguments(
+        { original: { input: '{"path":"src/a.ts","old_string":"a","new_string":"b"}' } },
+        "edit"
+      );
+      expect(edit.path).toBe("src/a.ts");
+      expect(edit.old_string).toBe("a");
+      expect(edit.new_string).toBe("b");
+
+      const bash = repairToolArguments({ original: '{"command":"ls"}' }, "bash");
+      expect(bash.command).toBe("ls");
+    });
+
   });
   describe("buildRequest", () => {
     test("creates valid Command Code Go envelope", () => {
@@ -174,6 +187,29 @@ describe("protocol", () => {
       const t2 = req.params.messages[2].content[0] as { type: string; toolCallId: string; toolName: string };
       expect(t2.toolCallId).toBe("call_01_def");
       expect(t2.toolName).toBe("read");
+    });
+
+    test("synthesizes a result for an unpaired tool call (aborted turn)", () => {
+      const req = buildRequest("deepseek-v4.1-flash", {
+        messages: [
+          {
+            role: "assistant",
+            content: [{ type: "toolCall", id: "call_abort", name: "bash", arguments: { command: "ls" } }],
+          },
+        ],
+      }) as { params: { messages: Array<{ role: string; content: unknown[] }> } };
+
+      expect(req.params.messages.map((m) => m.role)).toEqual(["assistant", "tool"]);
+      const result = req.params.messages[1].content[0] as {
+        type: string;
+        toolCallId: string;
+        toolName: string;
+        output: { type: string };
+      };
+      expect(result.type).toBe("tool-result");
+      expect(result.toolCallId).toBe("call_abort");
+      expect(result.toolName).toBe("bash");
+      expect(result.output.type).toBe("error-text");
     });
   });
   describe("event parsing", () => {
