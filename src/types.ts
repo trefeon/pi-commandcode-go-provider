@@ -179,6 +179,19 @@ export interface ProviderConfig {
   headers?: Record<string, string>;
   fetchDynamicModels?: () => Promise<ProviderModelConfig[]>;
   refreshModels?: () => Promise<ProviderModelConfig[]>;
+  oauth?: {
+    name: string;
+    login: (callbacks: {
+      onAuth?: (params: { url: string }) => void;
+      onPrompt: (params: { message: string }) => Promise<string>;
+    }) => Promise<{ refresh: string; access: string; expires: number }>;
+    refreshToken?: (credentials: { refresh: string; access: string; expires: number }) => Promise<{
+      refresh: string;
+      access: string;
+      expires: number;
+    }>;
+    getApiKey: (credentials: { refresh: string; access: string; expires: number }) => string;
+  };
 }
 
 export interface ExtensionContext {

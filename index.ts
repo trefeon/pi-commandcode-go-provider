@@ -56,6 +56,23 @@ export function createProviderConfig(): ProviderConfig {
     fetchDynamicModels: async () => models,
     // Pi uses refreshModels (replaces catalog; must not return empty)
     refreshModels: async () => models,
+    oauth: {
+      name: PROVIDER_NAME,
+      login: async (callbacks) => {
+        const raw = await callbacks.onPrompt({
+          message: "Paste your Command Code Go API key (starts with user_...):",
+        });
+        const key = raw.trim();
+        if (!key) throw new Error("No API key provided");
+        return {
+          refresh: key,
+          access: key,
+          expires: Date.now() + 10 * 365 * 24 * 60 * 60 * 1000,
+        };
+      },
+      refreshToken: async (credentials) => credentials,
+      getApiKey: (credentials) => credentials.access,
+    },
   };
 }
 
