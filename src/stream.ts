@@ -4,11 +4,11 @@ import { createAssistantMessageEventStream } from "./event-stream.js";
 import {
   buildRequest,
   CLI_VERSION,
+  coerceToolInput,
   DEFAULT_GATEWAY_URL,
   dropNullArguments,
   gatewayErrorDetail,
   parseEventStream,
-  repairToolArguments,
   sanitizeToolCallId,
 } from "./protocol.js";
 import type {
@@ -273,14 +273,14 @@ export function streamCommandCodeGo(
             const toolName = String(event.toolName ?? event.name ?? "unknown");
             const rawArgs = event.input ?? event.args ?? event.arguments ?? {};
             const schema = toolSchemas.get(toolName);
-            const filteredArgs = (dropNullArguments(rawArgs, schema) ?? {}) as JsonObject;
-            const repairedArgs = repairToolArguments(filteredArgs, toolName);
+            const filteredArgs = dropNullArguments(rawArgs, schema);
+            const coercedArgs = coerceToolInput(filteredArgs, toolName, schema);
 
             const toolCallBlock: ToolCallContent = {
               type: "toolCall",
               id: callId,
               name: toolName,
-              arguments: repairedArgs,
+              arguments: coercedArgs,
             };
 
             const callIndex = message.content.length;
@@ -290,7 +290,7 @@ export function streamCommandCodeGo(
             stream.push({
               type: "toolcall_delta",
               contentIndex: callIndex,
-              delta: JSON.stringify(repairedArgs),
+              delta: JSON.stringify(coercedArgs),
               partial: message,
             });
             stream.push({

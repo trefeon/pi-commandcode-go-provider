@@ -175,6 +175,65 @@ export function repairToolArguments(args: unknown, toolName?: string): JsonObjec
 
   return repaired as JsonObject;
 }
+/**
+ * Matches official Command Code CLI's wrapBareStringRoot.
+ * Wraps bare string returns into the single required root property if declared.
+ */
+function wrapBareStringRoot(text: string, schema: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(schema) || !isRecord(schema.properties)) return undefined;
+  const required = schema.required;
+  if (!Array.isArray(required) || required.length !== 1) return undefined;
+  const rootProp = required[0];
+  if (typeof rootProp !== "string") return undefined;
+  const propSchema = schema.properties[rootProp];
+  const isArray = isRecord(propSchema) && propSchema.type === "array";
+  return {
+    [rootProp]: isArray ? [text] : text,
+  };
+}
+
+/**
+ * Matches official Command Code CLI's coerceToolInput logic:
+ * - Unwraps single-element arrays
+ * - Parses JSON strings or wraps bare strings with wrapBareStringRoot
+ * - Applies repairToolArguments for model hallucinations
+ */
+export function coerceToolInput(raw: unknown, toolName?: string, schema?: unknown): JsonObject {
+  let input = raw;
+  if (Array.isArray(raw) && raw.length === 1) {
+    input = raw[0];
+  }
+
+  let result: Record<string, unknown> = {};
+
+  if (isRecord(input)) {
+    result = { ...input };
+  } else if (typeof input === "string" && input.trim().length > 0) {
+    let text = input;
+    let needsWrap = true;
+    try {
+      const parsed: unknown = JSON.parse(input);
+      if (isRecord(parsed)) {
+        result = parsed;
+        needsWrap = false;
+      } else if (typeof parsed === "string") {
+        text = parsed;
+      } else {
+        needsWrap = false;
+      }
+    } catch {
+      // not JSON
+    }
+
+    if (needsWrap && Object.keys(result).length === 0) {
+      const wrapped = wrapBareStringRoot(text, schema);
+      if (wrapped) result = wrapped;
+    }
+  }
+
+  return repairToolArguments(result, toolName);
+}
+
 
 
 export function sanitizeToolCallId(id: string): string {
@@ -389,10 +448,12 @@ export function buildRequest(
     }
   }
   // 4. Tools schema transformation
+  // 4. Tools schema (matches official CLI toWireTools without inflating with anyOf null hints)
   const wireTools = (context.tools ?? []).map((tool: ToolLike) => ({
+    type: "function",
     name: tool.name,
     ...(tool.description ? { description: tool.description } : {}),
-    input_schema: clientSchema(tool.parameters),
+    input_schema: tool.parameters,
   }));
 
   // 5. Reasoning effort
