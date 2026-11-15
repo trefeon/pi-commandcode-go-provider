@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_URL="https://github.com/trefeon/omp-command-code-go-provider.git"
+REPO_URL="https://github.com/trefeon/pi-commandcode-go-provider.git"
 EXT_DIR="$HOME/.omp/agent/extensions"
-TARGET_DIR="$EXT_DIR/omp-command-code-go-provider"
+TARGET_DIR="$EXT_DIR/pi-commandcode-go-provider"
 LOADER_FILE="$EXT_DIR/commandcode-go.ts"
 
 echo "=== Installing Command Code Go Provider for OMP ==="
@@ -20,7 +20,7 @@ fi
 
 echo "Registering auto-loader in $LOADER_FILE..."
 cat << 'EOF' > "$LOADER_FILE"
-import extension from "./omp-command-code-go-provider/index.ts";
+import extension from "./pi-commandcode-go-provider/index.ts";
 export default extension;
 EOF
 

@@ -1,9 +1,9 @@
 # Windows PowerShell installer for Command Code Go OMP Provider
 $ErrorActionPreference = "Stop"
 
-$RepoUrl = "https://github.com/trefeon/omp-command-code-go-provider.git"
+$RepoUrl = "https://github.com/trefeon/pi-commandcode-go-provider.git"
 $ExtDir = Join-Path $HOME ".omp\agent\extensions"
-$TargetDir = Join-Path $ExtDir "omp-command-code-go-provider"
+$TargetDir = Join-Path $ExtDir "pi-commandcode-go-provider"
 $LoaderFile = Join-Path $ExtDir "commandcode-go.ts"
 
 Write-Host "=== Installing Command Code Go Provider for OMP ===" -ForegroundColor Cyan
@@ -22,7 +22,7 @@ if (Test-Path (Join-Path $TargetDir ".git")) {
 
 Write-Host "Registering auto-loader in $LoaderFile..." -ForegroundColor Yellow
 $LoaderContent = @"
-import extension from "./omp-command-code-go-provider/index.ts";
+import extension from "./pi-commandcode-go-provider/index.ts";
 export default extension;
 "@
 

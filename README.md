@@ -1,4 +1,4 @@
-# omp-command-code-go-provider
+# pi-commandcode-go-provider
 
 Custom provider extension for **Oh My Pi (OMP)** and **Pi coding agent** that connects to the **Command Code Go plan ($1/mo)**.
 
@@ -23,22 +23,22 @@ This extension implements that wire protocol directly, allowing OMP and Pi to us
 
 ### Windows (PowerShell)
 ```powershell
-irm https://raw.githubusercontent.com/trefeon/omp-command-code-go-provider/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/trefeon/pi-commandcode-go-provider/main/scripts/install.ps1 | iex
 ```
 
 ### Linux / macOS / Git Bash
 ```bash
-curl -fsSL https://raw.githubusercontent.com/trefeon/omp-command-code-go-provider/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/trefeon/pi-commandcode-go-provider/main/scripts/install.sh | bash
 ```
 
 ### Manual Installation
 Clone the repository into your OMP extensions folder:
 ```bash
-git clone https://github.com/trefeon/omp-command-code-go-provider.git ~/.omp/agent/extensions/omp-command-code-go-provider
+git clone https://github.com/trefeon/pi-commandcode-go-provider.git ~/.omp/agent/extensions/pi-commandcode-go-provider
 ```
 Then create `~/.omp/agent/extensions/commandcode-go.ts`:
 ```typescript
-import extension from "./omp-command-code-go-provider/index.ts";
+import extension from "./pi-commandcode-go-provider/index.ts";
 export default extension;
 ```
 

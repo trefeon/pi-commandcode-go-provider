@@ -1,5 +1,5 @@
 {
-  "name": "omp-command-code-go-provider",
+  "name": "pi-commandcode-go-provider",
   "version": "0.1.0",
   "description": "Command Code Go ($1/mo plan) custom provider extension for Oh My Pi (OMP) and Pi coding agent",
   "type": "module",
