@@ -79,9 +79,10 @@ export function createProviderConfig(): ProviderConfig {
 export default async function (pi: ExtensionAPI): Promise<void> {
   const config = createProviderConfig();
 
-  // Register the custom provider in OMP/Pi
+  // Register as both 'commandcode-go' and 'commandcode' so users can use either:
+  // --model commandcode-go/<model> or the standard --model commandcode/<model>
   pi.registerProvider(PROVIDER_ID, config);
-
+  pi.registerProvider("commandcode", config);
   // Status command: displays configuration and active key presence safely
   if (pi.registerCommand) {
     pi.registerCommand("commandcode-go-status", {
@@ -158,8 +159,9 @@ export default async function (pi: ExtensionAPI): Promise<void> {
   // Auto-bind model on session start if selected
   if (pi.on) {
     pi.on("session_start", async (_event: unknown, ctx: ExtensionContext) => {
-      if (ctx.model?.provider === PROVIDER_ID && ctx.modelRegistry && pi.setModel) {
-        const registered = ctx.modelRegistry.find(PROVIDER_ID, ctx.model.id);
+      const provider = ctx.model?.provider;
+      if ((provider === PROVIDER_ID || provider === "commandcode") && ctx.model && ctx.modelRegistry && pi.setModel) {
+        const registered = ctx.modelRegistry.find(provider, ctx.model.id);
         if (registered) {
           await pi.setModel(registered);
         }
