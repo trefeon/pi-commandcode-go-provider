@@ -1,0 +1,385 @@
+import { isRecord, type ContextLike, type JsonObject, type MessageLike, type StreamOptions, type ToolLike } from "./types.js";
+import { toWireModelId } from "./catalog.js";
+
+export const DEFAULT_GATEWAY_URL = "https://api.commandcode.ai/alpha/generate";
+export const CLI_VERSION = "0.26.20";
+export const DEFAULT_MAX_TOKENS = 64_000;
+
+export const GATEWAY_EFFORTS: Record<string, string> = {
+  off: "off",
+  low: "low",
+  medium: "medium",
+  high: "high",
+  xhigh: "xhigh",
+  max: "max",
+};
+
+const NULL_ARGUMENT_HINT =
+  "Leave this out by passing null unless you need a value other than the default.";
+
+
+/** Whether a schema node already accepts an explicit `null`. */
+function allowsNull(schema: unknown): boolean {
+  if (!isRecord(schema)) return false;
+  if (schema.type === "null") return true;
+  if (Array.isArray(schema.type) && schema.type.includes("null")) return true;
+  if (schema.const === null) return true;
+  if (Array.isArray(schema.enum) && schema.enum.includes(null)) return true;
+  return Array.isArray(schema.anyOf) && schema.anyOf.some(allowsNull);
+}
+
+/** One optional property as the wire's nullable shape, hinting at the null. */
+function optionalAsNull(property: Record<string, unknown>): Record<string, unknown> {
+  const description =
+    typeof property.description === "string" && property.description.length > 0
+      ? `${property.description} ${NULL_ARGUMENT_HINT}`
+      : NULL_ARGUMENT_HINT;
+  return {
+    anyOf: [
+      { ...property, description },
+      { type: "null", description: "Use null when you do not need this argument." },
+    ],
+  };
+}
+
+/**
+ * Transforms a tool's parameters schema so optional fields become nullable.
+ * Required because Command Code's internal gateway proxies to strict OpenAI Responses.
+ */
+export function clientSchema(parameters: unknown): unknown {
+  if (!isRecord(parameters)) return parameters;
+  const schema: Record<string, unknown> = { ...parameters };
+  if (isRecord(parameters.properties)) {
+    const required = new Set(Array.isArray(parameters.required) ? parameters.required : []);
+    const properties: Record<string, unknown> = {};
+    for (const [name, property] of Object.entries(parameters.properties)) {
+      const declared = clientSchema(property);
+      properties[name] =
+        !required.has(name) && isRecord(declared) && !allowsNull(declared)
+          ? optionalAsNull(declared)
+          : declared;
+    }
+    schema.properties = properties;
+  }
+  if (parameters.items !== undefined) schema.items = clientSchema(parameters.items);
+  if (Array.isArray(parameters.anyOf)) schema.anyOf = parameters.anyOf.map(clientSchema);
+  return schema;
+}
+
+/**
+ * Drops null arguments that the model passed for optional fields.
+ */
+export function dropNullArguments(value: unknown, schema: unknown): unknown {
+  if (Array.isArray(value)) {
+    const items = isRecord(schema) ? schema.items : undefined;
+    return value.map((entry) => dropNullArguments(entry, items));
+  }
+  if (!isRecord(value)) return value;
+  const properties =
+    isRecord(schema) && isRecord(schema.properties)
+      ? (schema.properties as Record<string, unknown>)
+      : undefined;
+  const required = new Set(
+    isRecord(schema) && Array.isArray(schema.required) ? schema.required : []
+  );
+  const dropped: Record<string, unknown> = {};
+  for (const [name, entry] of Object.entries(value)) {
+    if (entry === null) {
+      const declared = properties?.[name];
+      if (declared !== undefined && !required.has(name) && !allowsNull(declared)) continue;
+    }
+    dropped[name] = dropNullArguments(entry, properties?.[name]);
+  }
+  return dropped;
+}
+
+export function sanitizeToolCallId(id: string): string {
+  const head = id.includes("|") ? id.split("|")[0] : id;
+  return head.length > 64 ? head.slice(0, 64) : head;
+}
+
+function safeParseJson(raw: unknown): unknown {
+  if (typeof raw !== "string") return raw;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}
+
+function flattenText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  let text = "";
+  for (const part of content) {
+    if (!part || typeof part !== "object") continue;
+    if (part.type === "text" && typeof part.text === "string") {
+      text += part.text;
+    } else if (part.text && typeof part.text === "string") {
+      text += part.text;
+    }
+  }
+  return text;
+}
+
+function serializeAssistant(message: MessageLike): Record<string, unknown> {
+  const parts: unknown[] = [];
+  const content = Array.isArray(message.content)
+    ? message.content
+    : typeof message.content === "string"
+      ? [{ type: "text", text: message.content }]
+      : [];
+
+  for (const block of content) {
+    if (!block || typeof block !== "object") continue;
+    const b = block as Record<string, unknown>;
+    if (b.type === "text" && typeof b.text === "string") {
+      parts.push({ type: "text", text: b.text });
+    } else if ((b.type === "thinking" || b.type === "reasoning") && typeof (b.thinking ?? b.text) === "string") {
+      parts.push({ type: "reasoning", text: b.thinking ?? b.text });
+    } else if (b.type === "toolCall" || b.type === "tool-call") {
+      const callId = sanitizeToolCallId(String(b.id ?? ""));
+      parts.push({
+        type: "tool-call",
+        toolCallId: callId,
+        toolName: String(b.name ?? "unknown"),
+        input: safeParseJson(b.arguments),
+      });
+    }
+  }
+  return { role: "assistant", content: parts };
+}
+
+function serializeUser(message: MessageLike): Record<string, unknown>[] {
+  if (typeof message.content === "string") {
+    return [{ role: "user", content: message.content }];
+  }
+  if (Array.isArray(message.content)) {
+    const parts: unknown[] = [];
+    for (const block of message.content) {
+      if (!block || typeof block !== "object") continue;
+      const b = block as Record<string, unknown>;
+      if (b.type === "text" && typeof b.text === "string") {
+        parts.push({ type: "text", text: b.text });
+      } else if (b.type === "image") {
+        // Forward image part
+        parts.push({
+          type: "image",
+          image: b.data ?? b.image,
+          mimeType: b.mimeType ?? b.mediaType ?? "image/png",
+        });
+      }
+    }
+    if (parts.length === 0) return [];
+    const isAllText = parts.every((p) => (p as Record<string, unknown>).type === "text");
+    return [
+      isAllText
+        ? { role: "user", content: parts.map((p) => (p as Record<string, unknown>).text).join("") }
+        : { role: "user", content: parts },
+    ];
+  }
+  return [];
+}
+
+function serializeTool(
+  message: MessageLike,
+  toolNames: Map<string, string>
+): Record<string, unknown>[] {
+  const rawId = String(message.toolCallId ?? "");
+  const toolCallId = sanitizeToolCallId(rawId);
+  const text = flattenText(message.content);
+  const toolName = message.toolName ?? toolNames.get(toolCallId) ?? "unknown";
+
+  return [
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId,
+          toolName,
+          output:
+            message.isError === true
+              ? { type: "error-text", value: text || "Execution denied" }
+              : { type: "text", value: text || "(no output)" },
+        },
+      ],
+    },
+  ];
+}
+
+/**
+ * Builds the complete Command Code Go `/alpha/generate` request envelope.
+ */
+export function buildRequest(
+  modelId: string,
+  context: ContextLike,
+  options?: StreamOptions
+): Record<string, unknown> {
+  // 1. Fold system prompts
+  let system = "";
+  if (Array.isArray(context.systemPrompt)) {
+    system = context.systemPrompt.join("\n\n");
+  } else if (typeof context.systemPrompt === "string") {
+    system = context.systemPrompt;
+  }
+
+  // 2. Track tool names from assistant tool calls for tool results
+  const toolNames = new Map<string, string>();
+  const messages = context.messages ?? [];
+  for (const message of messages) {
+    if (message.role !== "assistant") continue;
+    if (Array.isArray(message.content)) {
+      for (const block of message.content) {
+        if (!block || typeof block !== "object") continue;
+        const b = block as Record<string, unknown>;
+        if ((b.type === "toolCall" || b.type === "tool-call") && b.id && b.name) {
+          toolNames.set(sanitizeToolCallId(String(b.id)), String(b.name));
+        }
+      }
+    }
+  }
+
+  // 3. Serialize messages
+  const wireMessages: Record<string, unknown>[] = [];
+  for (const message of messages) {
+    switch (message.role) {
+      case "system":
+      case "developer": {
+        const text = flattenText(message.content);
+        if (text) system += (system ? "\n\n" : "") + text;
+        break;
+      }
+      case "assistant":
+        wireMessages.push(serializeAssistant(message));
+        break;
+      case "tool":
+        for (const turn of serializeTool(message, toolNames)) {
+          wireMessages.push(turn);
+        }
+        break;
+      default:
+        for (const turn of serializeUser(message)) {
+          wireMessages.push(turn);
+        }
+    }
+  }
+
+  // 4. Tools schema transformation
+  const wireTools = (context.tools ?? []).map((tool: ToolLike) => ({
+    name: tool.name,
+    ...(tool.description ? { description: tool.description } : {}),
+    input_schema: clientSchema(tool.parameters),
+  }));
+
+  // 5. Reasoning effort
+  let reasoningEffort: string | undefined;
+  if (options?.reasoning && GATEWAY_EFFORTS[options.reasoning.toLowerCase()]) {
+    reasoningEffort = GATEWAY_EFFORTS[options.reasoning.toLowerCase()];
+  }
+
+  const wireModel = toWireModelId(modelId);
+
+  return {
+    config: {
+      workingDir: process.cwd(),
+      date: new Date().toISOString().split("T")[0],
+      environment: `${process.platform}-${process.arch}`,
+      structure: [],
+      isGitRepo: false,
+      currentBranch: "",
+      mainBranch: "",
+      gitStatus: "",
+      recentCommits: [],
+    },
+    memory: "",
+    taste: "",
+    skills: null,
+    permissionMode: "standard",
+    params: {
+      model: wireModel,
+      messages: wireMessages,
+      tools: wireTools,
+      system,
+      max_tokens: options?.maxTokens ?? DEFAULT_MAX_TOKENS,
+      stream: true,
+      ...(options?.temperature !== undefined ? { temperature: options.temperature } : {}),
+      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+    },
+  };
+}
+
+export function parseEventLine(line: string): Record<string, unknown> | undefined {
+  const trimmed = line.trim();
+  if (trimmed.length === 0 || trimmed.startsWith(":")) return undefined;
+  // Strip optional SSE 'data: ' prefix if present
+  const data = trimmed.startsWith("data:") ? trimmed.slice(5).trim() : trimmed;
+  if (!data || data === "[DONE]") return undefined;
+
+  try {
+    const parsed: unknown = JSON.parse(data);
+    if (isRecord(parsed) && typeof parsed.type === "string") {
+      return parsed;
+    }
+  } catch {
+    // Non-JSON or incomplete line
+  }
+  return undefined;
+}
+
+/**
+ * Parses line-delimited JSON byte stream from /alpha/generate.
+ */
+export async function* parseEventStream(
+  stream: ReadableStream<Uint8Array>
+): AsyncGenerator<Record<string, unknown>> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += done ? "" : decoder.decode(value, { stream: true });
+      let newlineIndex: number;
+      while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, newlineIndex);
+        buffer = buffer.slice(newlineIndex + 1);
+        const event = parseEventLine(line);
+        if (event !== undefined) yield event;
+      }
+      if (done) {
+        if (buffer.trim().length > 0) {
+          const event = parseEventLine(buffer);
+          if (event !== undefined) yield event;
+        }
+        return;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+export function gatewayErrorDetail(body: string): string {
+  const trimmed = body.trim();
+  if (trimmed.length === 0) return "Empty error response from Command Code gateway";
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (isRecord(parsed)) {
+      const err = parsed.error;
+      if (typeof err === "string") return err;
+      if (isRecord(err)) {
+        const msg = (typeof err.message === "string" && err.message.trim().length > 0 ? err.message.trim() : undefined)
+          ?? (typeof err.detail === "string" && err.detail.trim().length > 0 ? err.detail.trim() : undefined);
+        const code = typeof err.code === "string" && err.code.trim().length > 0 ? err.code.trim() : undefined;
+        if (msg && code) return `${msg} [${code}]`;
+        if (msg) return msg;
+        if (code) return `Error code: ${code}`;
+      }
+    }
+  } catch {
+    // Plain text or HTML
+  }
+  return trimmed.slice(0, 1000);
+}

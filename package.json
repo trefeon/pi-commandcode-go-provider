@@ -1,0 +1,26 @@
+{
+  "name": "omp-command-code-go-provider",
+  "version": "0.1.0",
+  "description": "Command Code Go ($1/mo plan) custom provider extension for Oh My Pi (OMP) and Pi coding agent",
+  "type": "module",
+  "main": "index.ts",
+  "types": "index.ts",
+  "scripts": {
+    "test": "bun test tests/",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "omp",
+    "commandcode",
+    "commandcode-go",
+    "provider"
+  ],
+  "author": "trefeon",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/bun": "^1.4.4",
+    "@types/node": "^26.6.6"
+  }
+}
