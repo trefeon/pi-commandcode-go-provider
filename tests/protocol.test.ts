@@ -202,6 +202,9 @@ describe("protocol", () => {
       expect(req.params.messages[1].role).toBe("assistant");
       expect(req.params.messages[2].role).toBe("tool");
       expect(req.params.tools.length).toBe(1);
+      expect((req.params.tools[0] as { type?: string }).type).toBeUndefined();
+      expect((req as unknown as { memory: unknown }).memory).toBeNull();
+      expect((req as unknown as { mode: string }).mode).toBe("agent");
     });
 
     test("repairs replayed history tool-call arguments with the tool schema", () => {
@@ -229,6 +232,88 @@ describe("protocol", () => {
 
       expect(req.params.messages[0].content[0].type).toBe("tool-call");
       expect(req.params.messages[0].content[0].input?.path).toBe("a.txt");
+    });
+
+    test("forwards user images as data URLs with mimeType", () => {
+      const req = buildRequest("deepseek-v4.1-flash", {
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "What color?" },
+              { type: "image", data: "AAAA", mimeType: "image/png" },
+            ],
+          },
+        ],
+      }) as { params: { messages: Array<{ role: string; content: Array<Record<string, unknown>> }> } };
+
+      expect(req.params.messages[0].content[1]).toEqual({
+        type: "image",
+        image: "data:image/png;base64,AAAA",
+        mimeType: "image/png",
+      });
+    });
+
+    test("batches tool-result images into one user turn after all tool results", () => {
+      const req = buildRequest("deepseek-v4.1-flash", {
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              { type: "toolCall", id: "call_1", name: "read", arguments: { path: "a" } },
+              { type: "toolCall", id: "call_2", name: "read", arguments: { path: "b" } },
+            ],
+          },
+          {
+            role: "toolResult",
+            toolCallId: "call_1",
+            toolName: "read",
+            content: [
+              { type: "text", text: "one" },
+              { type: "image", data: "AAA", mimeType: "image/png" },
+            ],
+          },
+          {
+            role: "toolResult",
+            toolCallId: "call_2",
+            toolName: "read",
+            content: [
+              { type: "text", text: "two" },
+              { type: "image", data: "BBB", mimeType: "image/jpeg" },
+            ],
+          },
+          { role: "assistant", content: [{ type: "text", text: "done" }] },
+        ],
+        tools: [
+          {
+            name: "read",
+            parameters: {
+              type: "object",
+              properties: { path: { type: "string" } },
+              required: ["path"],
+            },
+          },
+        ],
+      }) as { params: { messages: Array<{ role: string; content: Array<Record<string, unknown>> }> } };
+
+      expect(req.params.messages.map((m) => m.role)).toEqual(["assistant", "tool", "tool", "user", "assistant"]);
+      const toolText = req.params.messages[1].content[0] as { output: { value: string } };
+      expect(toolText.output.value).toBe("one");
+      expect(req.params.messages[3].content).toEqual([
+        { type: "image", image: "data:image/png;base64,AAA", mimeType: "image/png" },
+        { type: "image", image: "data:image/jpeg;base64,BBB", mimeType: "image/jpeg" },
+      ]);
+    });
+
+    test("drops tool results whose call never appears in history", () => {
+      const req = buildRequest("deepseek-v4.1-flash", {
+        messages: [
+          { role: "toolResult", toolCallId: "call_orphan", toolName: "read", content: "stale" },
+          { role: "user", content: "hello" },
+        ],
+      }) as { params: { messages: Array<{ role: string }> } };
+
+      expect(req.params.messages.map((m) => m.role)).toEqual(["user"]);
     });
 
     test("clamps oversized max_tokens to the gateway ceiling", () => {

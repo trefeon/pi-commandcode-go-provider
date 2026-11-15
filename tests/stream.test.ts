@@ -276,6 +276,79 @@ describe("streamCommandCodeGo", () => {
     }
   });
 
+  test("errors when the stream closes without a finish signal", async () => {
+    const mockBody = createMockStream([
+      '{"type":"text-start"}\n',
+      '{"type":"text-delta","text":"partial"}\n',
+    ]);
+    const mockFetch = async () =>
+      new Response(mockBody, { status: 200, headers: { "content-type": "application/x-ndjson" } });
+    const stream = streamCommandCodeGo(
+      resolveModel("deepseek-v4-pro"),
+      { messages: [{ role: "user", content: "Hi" }] },
+      { apiKey: "mock_key", fetch: mockFetch }
+    );
+
+    const events: AssistantMessageEvent[] = [];
+    for await (const event of stream) events.push(event);
+
+    expect(events.some((e) => e.type === "done")).toBe(false);
+    const errorEvent = events.find((e) => e.type === "error");
+    expect(errorEvent).toBeDefined();
+    if (errorEvent && errorEvent.type === "error") {
+      expect(errorEvent.error.errorMessage).toContain("without a finish event");
+    }
+  });
+
+  test("errors when the provider reports a failure finish reason", async () => {
+    const mockBody = createMockStream([
+      '{"type":"text-start"}\n',
+      '{"type":"text-delta","text":"partial"}\n',
+      '{"type":"finish","finishReason":"error","message":"upstream exploded"}\n',
+    ]);
+    const mockFetch = async () =>
+      new Response(mockBody, { status: 200, headers: { "content-type": "application/x-ndjson" } });
+    const stream = streamCommandCodeGo(
+      resolveModel("deepseek-v4-pro"),
+      { messages: [{ role: "user", content: "Hi" }] },
+      { apiKey: "mock_key", fetch: mockFetch }
+    );
+
+    const events: AssistantMessageEvent[] = [];
+    for await (const event of stream) events.push(event);
+
+    expect(events.some((e) => e.type === "done")).toBe(false);
+    const errorEvent = events.find((e) => e.type === "error");
+    expect(errorEvent).toBeDefined();
+    if (errorEvent && errorEvent.type === "error") {
+      expect(errorEvent.error.errorMessage).toBe("upstream exploded");
+    }
+  });
+
+  test("treats finish-step as a completion signal", async () => {
+    const mockBody = createMockStream([
+      '{"type":"text-start"}\n',
+      '{"type":"text-delta","text":"done"}\n',
+      '{"type":"finish-step","finishReason":"stop"}\n',
+    ]);
+    const mockFetch = async () =>
+      new Response(mockBody, { status: 200, headers: { "content-type": "application/x-ndjson" } });
+    const stream = streamCommandCodeGo(
+      resolveModel("deepseek-v4-pro"),
+      { messages: [{ role: "user", content: "Hi" }] },
+      { apiKey: "mock_key", fetch: mockFetch }
+    );
+
+    const events: AssistantMessageEvent[] = [];
+    for await (const event of stream) events.push(event);
+
+    const doneEvent = events.find((e) => e.type === "done");
+    expect(doneEvent).toBeDefined();
+    if (doneEvent && doneEvent.type === "done") {
+      expect(doneEvent.reason).toBe("stop");
+    }
+  });
+
   test("retries once with the max_tokens ceiling named by a 400", async () => {
     const bodies: string[] = [];
     const okBody = createMockStream([

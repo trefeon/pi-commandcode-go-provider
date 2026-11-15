@@ -91,6 +91,7 @@ function mapFinishReason(rawReason: unknown, hasToolCalls: boolean): StopReason 
     case "max_tokens":
     case "max-tokens":
     case "max_output_tokens":
+    case "model_context_window_exceeded":
       return "length";
     case "stop":
     case "end_turn":
@@ -215,6 +216,28 @@ export function streamCommandCodeGo(
       let currentThinkingBlock: ThinkingContent | null = null;
       let currentThinkingIndex = -1;
       let hasToolCalls = false;
+      let sawCompletion = false;
+      let lastFinishReason: unknown = "stop";
+      const closeOpenBlocks = () => {
+        if (currentTextBlock && currentTextIndex >= 0) {
+          stream.push({
+            type: "text_end",
+            contentIndex: currentTextIndex,
+            content: currentTextBlock.text,
+            partial: message,
+          });
+          currentTextBlock = null;
+        }
+        if (currentThinkingBlock && currentThinkingIndex >= 0) {
+          stream.push({
+            type: "thinking_end",
+            contentIndex: currentThinkingIndex,
+            content: currentThinkingBlock.thinking,
+            partial: message,
+          });
+          currentThinkingBlock = null;
+        }
+      };
       // The gateway streams tool input as start/delta/end and also emits a final
       // `tool-call` with the parsed input. Keep the deltas so a final event that
       // omits (or empties) `input` still yields the model's arguments.
@@ -403,11 +426,14 @@ export function streamCommandCodeGo(
           }
 
           case "finish-step": {
+            sawCompletion = true;
+            if (event.finishReason !== undefined) lastFinishReason = event.finishReason;
             applyGatewayUsage(isRecord(event.usage) ? event.usage : event, message.usage, model);
             break;
           }
 
           case "finish": {
+            sawCompletion = true;
             const rawUsage = isRecord(event.totalUsage)
               ? event.totalUsage
               : isRecord(event.usage)
@@ -415,27 +441,28 @@ export function streamCommandCodeGo(
                 : {};
             applyGatewayUsage(rawUsage, message.usage, model);
 
-            // Close any open text or thinking blocks
-            if (currentTextBlock && currentTextIndex >= 0) {
-              stream.push({
-                type: "text_end",
-                contentIndex: currentTextIndex,
-                content: currentTextBlock.text,
-                partial: message,
-              });
-              currentTextBlock = null;
-            }
-            if (currentThinkingBlock && currentThinkingIndex >= 0) {
-              stream.push({
-                type: "thinking_end",
-                contentIndex: currentThinkingIndex,
-                content: currentThinkingBlock.thinking,
-                partial: message,
-              });
-              currentThinkingBlock = null;
+            const rawFinish = event.finishReason ?? event.rawFinishReason ?? "stop";
+            lastFinishReason = rawFinish;
+            const finishKey = typeof rawFinish === "string" ? rawFinish.trim().toLowerCase() : "";
+            const providerFailure =
+              finishKey === "error" || /^(?:network|connection|upstream)[-_\s]?error$/.test(finishKey);
+            // Provider-side failure finishes are not business stop reasons: keep
+            // partial content but report an error so the host can retry instead
+            // of presenting a truncated answer as complete.
+            if (providerFailure) {
+              closeOpenBlocks();
+              const errPayload = isRecord(event.error) ? event.error : undefined;
+              message.stopReason = "error";
+              message.errorMessage =
+                (typeof errPayload?.message === "string" ? errPayload.message : undefined) ??
+                (typeof event.message === "string" ? event.message : undefined) ??
+                `Provider reported ${String(rawFinish)}`;
+              stream.push({ type: "error", reason: "error", error: message });
+              return;
             }
 
-            const rawFinish = event.finishReason ?? event.rawFinishReason ?? "stop";
+            closeOpenBlocks();
+
             const finalReason = mapFinishReason(rawFinish, hasToolCalls);
             message.stopReason = finalReason;
 
@@ -445,33 +472,21 @@ export function streamCommandCodeGo(
         }
       }
 
-      // If stream ended without an explicit finish event
-      if (currentTextBlock && currentTextIndex >= 0) {
-        stream.push({
-          type: "text_end",
-          contentIndex: currentTextIndex,
-          content: currentTextBlock.text,
-          partial: message,
-        });
-      }
-      if (currentThinkingBlock && currentThinkingIndex >= 0) {
-        stream.push({
-          type: "thinking_end",
-          contentIndex: currentThinkingIndex,
-          content: currentThinkingBlock.thinking,
-          partial: message,
-        });
+      closeOpenBlocks();
+
+      if (!sawCompletion) {
+        message.stopReason = "error";
+        message.errorMessage =
+          message.content.length > 0
+            ? "Stream ended without a finish event from the Command Code gateway; response was truncated"
+            : "Stream completed without producing any content";
+        stream.push({ type: "error", reason: "error", error: message });
+        return;
       }
 
-      if (message.content.length > 0) {
-        const finalReason = mapFinishReason("stop", hasToolCalls);
-        message.stopReason = finalReason;
-        stream.push({ type: "done", reason: finalReason, message });
-      } else {
-        message.stopReason = "error";
-        message.errorMessage = "Stream completed without producing any content";
-        stream.push({ type: "error", reason: "error", error: message });
-      }
+      const finalReason = mapFinishReason(lastFinishReason, hasToolCalls);
+      message.stopReason = finalReason;
+      stream.push({ type: "done", reason: finalReason, message });
     } catch (err) {
       message.stopReason = "error";
       message.errorMessage = err instanceof Error ? err.message : String(err);

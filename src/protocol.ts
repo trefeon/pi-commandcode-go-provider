@@ -407,6 +407,42 @@ function flattenText(content: unknown): string {
   return text;
 }
 
+/**
+ * One harness image block as the gateway's user-message image part.
+ * Live probe on 2026-11-15: the gateway needs `mimeType`; `mediaType` silently
+ * drops the image (model answered "White" for a solid-red PNG). Both a data URL
+ * and raw base64 are accepted for `image`, so always send the canonical data URL.
+ */
+function toWireImagePart(block: Record<string, unknown>): Record<string, unknown> | undefined {
+  const source = isRecord(block.source) ? block.source : undefined;
+  const raw =
+    block.data ??
+    block.image ??
+    (source?.type === "base64" ? source.data : undefined) ??
+    (isRecord(block.image_url) ? block.image_url.url : undefined);
+  if (typeof raw !== "string" || raw.length === 0) return undefined;
+  const mimeType = String(block.mimeType ?? block.mediaType ?? source?.media_type ?? "image/png");
+  return {
+    type: "image",
+    image: raw.startsWith("data:") ? raw : `data:${mimeType};base64,${raw}`,
+    mimeType,
+  };
+}
+
+/** Every image block in a message, in wire form. */
+function imagePartsOf(content: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(content)) return [];
+  const parts: Record<string, unknown>[] = [];
+  for (const block of content) {
+    if (!block || typeof block !== "object") continue;
+    const b = block as Record<string, unknown>;
+    if (b.type !== "image" && b.type !== "image_url") continue;
+    const part = toWireImagePart(b);
+    if (part) parts.push(part);
+  }
+  return parts;
+}
+
 function serializeAssistant(message: MessageLike, toolSchemas?: Map<string, unknown>): Record<string, unknown> {
   const parts: unknown[] = [];
   const content = Array.isArray(message.content)
@@ -454,13 +490,9 @@ function serializeUser(message: MessageLike): Record<string, unknown>[] {
       const b = block as Record<string, unknown>;
       if (b.type === "text" && typeof b.text === "string") {
         parts.push({ type: "text", text: b.text });
-      } else if (b.type === "image") {
-        // Forward image part
-        parts.push({
-          type: "image",
-          image: b.data ?? b.image,
-          mimeType: b.mimeType ?? b.mediaType ?? "image/png",
-        });
+      } else if (b.type === "image" || b.type === "image_url") {
+        const part = toWireImagePart(b);
+        if (part) parts.push(part);
       }
     }
     if (parts.length === 0) return [];
@@ -517,9 +549,11 @@ export function buildRequest(
     system = context.systemPrompt;
   }
 
-  // 2. Track tool names from assistant tool calls for tool results, and the
-  // call ids that already have a result anywhere in the history.
+  // 2. Track tool names from assistant tool calls for tool results, the call
+  // ids declared anywhere in the history, and the call ids that already have a
+  // result.
   const toolNames = new Map<string, string>();
+  const knownCallIds = new Set<string>();
   const answeredCalls = new Set<string>();
   const messages = context.messages ?? [];
   for (const message of messages) {
@@ -541,17 +575,34 @@ export function buildRequest(
         const id = b.id ?? b.call_id ?? b.toolCallId;
         const fnName = b.function && typeof b.function === "object" ? (b.function as Record<string, unknown>).name : undefined;
         const name = b.name ?? fnName;
-        if (isTc && id && name) {
-          toolNames.set(sanitizeToolCallId(String(id)), String(name));
-        }
+        if (!isTc || !id) continue;
+        knownCallIds.add(sanitizeToolCallId(String(id)));
+        if (name) toolNames.set(sanitizeToolCallId(String(id)), String(name));
       }
     }
   }
 
-  // 3. Serialize messages
+  // 3. Serialize messages. Tool-result images are hoisted into one user turn
+  // after the whole tool run: the gateway only carries image parts on user
+  // turns, and an interleaved user turn would end tool-result collection.
   const toolSchemas = new Map<string, unknown>();
   for (const tool of context.tools ?? []) toolSchemas.set(tool.name, tool.parameters);
   const wireMessages: Record<string, unknown>[] = [];
+  const deferredToolImages: Record<string, unknown>[] = [];
+  const flushToolImages = () => {
+    if (deferredToolImages.length === 0) return;
+    wireMessages.push({ role: "user", content: deferredToolImages.splice(0) });
+  };
+  const pushToolResult = (message: MessageLike) => {
+    const rec = message as unknown as Record<string, unknown>;
+    const callId = sanitizeToolCallId(String(message.toolCallId ?? rec.tool_call_id ?? rec.id ?? ""));
+    // A result whose call never appears in history makes the gateway 400.
+    if (callId && !knownCallIds.has(callId)) return;
+    for (const turn of serializeTool(message, toolNames)) {
+      wireMessages.push(turn);
+    }
+    deferredToolImages.push(...imagePartsOf(message.content));
+  };
   for (const message of messages) {
     switch (message.role) {
       case "system":
@@ -561,6 +612,7 @@ export function buildRequest(
         break;
       }
       case "assistant": {
+        flushToolImages();
         const turn = serializeAssistant(message, toolSchemas);
         wireMessages.push(turn);
         // The gateway rejects the whole request with "Tool results are missing
@@ -592,18 +644,15 @@ export function buildRequest(
       case "tool":
       case "toolResult":
       case "tool_result": {
-        for (const turn of serializeTool(message, toolNames)) {
-          wireMessages.push(turn);
-        }
+        pushToolResult(message);
         break;
       }
       default: {
         const rec = message as unknown as Record<string, unknown>;
         if (message.toolCallId || rec.tool_call_id || rec.toolCallId) {
-          for (const turn of serializeTool(message, toolNames)) {
-            wireMessages.push(turn);
-          }
+          pushToolResult(message);
         } else {
+          flushToolImages();
           for (const turn of serializeUser(message)) {
             wireMessages.push(turn);
           }
@@ -612,10 +661,9 @@ export function buildRequest(
       }
     }
   }
-  // 4. Tools schema transformation
-  // 4. Tools schema (matches official CLI toWireTools without inflating with anyOf null hints)
+  // 4. Tools schema (matches official CLI toWireTools: name/description/input_schema only)
+  flushToolImages();
   const wireTools = (context.tools ?? []).map((tool: ToolLike) => ({
-    type: "function",
     name: tool.name,
     ...(tool.description ? { description: tool.description } : {}),
     input_schema: tool.parameters,
@@ -628,6 +676,9 @@ export function buildRequest(
   }
 
   const wireModel = toWireModelId(modelId);
+  // The gateway injects a ~7.5K-token default system prompt when `params.system`
+  // is missing; a space placeholder keeps the request neutral (CLI behavior).
+  const wireSystem = system.trim().length > 0 ? system : " ";
 
   return {
     config: {
@@ -641,15 +692,16 @@ export function buildRequest(
       gitStatus: "",
       recentCommits: [],
     },
-    memory: "",
-    taste: "",
+    memory: null,
+    taste: null,
     skills: null,
     permissionMode: "standard",
+    mode: "agent",
     params: {
       model: wireModel,
       messages: wireMessages,
       tools: wireTools,
-      system,
+      system: wireSystem,
       max_tokens: clampMaxTokens(options?.maxTokens),
       stream: true,
       ...(options?.temperature !== undefined ? { temperature: options.temperature } : {}),
