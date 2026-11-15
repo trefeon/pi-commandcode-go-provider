@@ -121,3 +121,20 @@ export function toWireModelId(id: string): string {
   const model = resolveModel(id);
   return model.wireId ?? model.id;
 }
+
+/**
+ * Deterministic compaction/handoff model: largest context window, then
+ * cheapest input, then id — so compaction of an oversized context always has
+ * a candidate that can actually read it (omp tries this reference before the
+ * session model; a withdrawn upstream id degrades gracefully to the session
+ * model).
+ */
+export function preferredCompactionModelId(): string {
+  const sorted = [...COMMAND_CODE_GO_MODELS].sort(
+    (a, b) =>
+      b.contextWindow - a.contextWindow ||
+      a.cost.input - b.cost.input ||
+      a.id.localeCompare(b.id),
+  );
+  return sorted[0]?.id ?? "deepseek-v4.1-flash";
+}

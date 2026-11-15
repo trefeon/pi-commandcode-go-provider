@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { COMMAND_CODE_GO_MODELS, resolveModel, toWireModelId } from "../src/catalog.js";
+import { COMMAND_CODE_GO_MODELS, preferredCompactionModelId, resolveModel, toWireModelId } from "../src/catalog.js";
 
 describe("catalog", () => {
   test("contains only Go-tier models with zero duplicates", () => {
@@ -52,5 +52,17 @@ describe("catalog", () => {
       expect(model.maxTokens).toBeGreaterThan(0);
       expect(model.name).toBeTruthy();
     }
+  });
+
+  test("preferredCompactionModelId picks the largest window, then cheapest input", () => {
+    const expected = [...COMMAND_CODE_GO_MODELS].sort(
+      (a, b) =>
+        b.contextWindow - a.contextWindow ||
+        a.cost.input - b.cost.input ||
+        a.id.localeCompare(b.id),
+    )[0]!.id;
+    expect(preferredCompactionModelId()).toBe(expected);
+    const picked = COMMAND_CODE_GO_MODELS.find((m) => m.id === preferredCompactionModelId())!;
+    expect(picked.contextWindow).toBeGreaterThanOrEqual(1_000_000);
   });
 });

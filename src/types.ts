@@ -170,6 +170,12 @@ export interface ProviderModelConfig {
   maxTokens?: number;
   cost?: ModelCost;
   compat?: Record<string, unknown>;
+  /**
+   * Host passthrough (verified: omp keeps undeclared fields on the registered
+   * Model). Model reference used for handoff/compaction generation when the
+   * session context outgrows the session model's own window.
+   */
+  compactionModel?: string;
 }
 
 export interface ProviderConfig {

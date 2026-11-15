@@ -8,7 +8,7 @@
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { hasApiKey, resolveApiKey } from "./src/auth.js";
-import { COMMAND_CODE_GO_MODELS, registerCatalogModels } from "./src/catalog.js";
+import { COMMAND_CODE_GO_MODELS, preferredCompactionModelId, registerCatalogModels } from "./src/catalog.js";
 import { loadCachedCatalog, refreshCatalog } from "./src/dynamic-catalog.js";
 import { clampMaxTokens } from "./src/protocol.js";
 import { fetchUsageOverview } from "./src/quota.js";
@@ -48,6 +48,8 @@ function formatCountdown(iso: string): string {
   return `${mins}m`;
 }
 
+const COMPACTION_MODEL_REF = `commandcode-go/${preferredCompactionModelId()}`;
+
 function toProviderModelConfig(model: CommandCodeGoModel): ProviderModelConfig {
   return {
     id: model.id,
@@ -60,6 +62,7 @@ function toProviderModelConfig(model: CommandCodeGoModel): ProviderModelConfig {
     contextWindow: model.contextWindow,
     maxTokens: clampMaxTokens(model.maxTokens),
     cost: model.cost,
+    compactionModel: COMPACTION_MODEL_REF,
   };
 }
 
