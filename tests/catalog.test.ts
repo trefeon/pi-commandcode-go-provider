@@ -43,7 +43,7 @@ describe("catalog", () => {
     const fallback = resolveModel("future-model-99");
     expect(fallback.id).toBe("future-model-99");
     expect(fallback.contextWindow).toBe(1_000_000);
-    expect(fallback.maxTokens).toBe(64_000);
+    expect(fallback.maxTokens).toBe(200_000);
   });
 
   test("all models have valid context window and maxTokens", () => {

@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { resolveApiKey } from "./auth.js";
 import { COMMAND_CODE_GO_MODELS, registerCatalogModels } from "./catalog.js";
-import { clampMaxTokens, CLI_VERSION, DEFAULT_MAX_TOKENS } from "./protocol.js";
+import { clampMaxTokens, CLI_VERSION, MAX_OUTPUT_TOKENS } from "./protocol.js";
 import type { CommandCodeGoModel, ModelCost } from "./types.js";
 import { isRecord } from "./types.js";
 
@@ -126,7 +126,7 @@ function toDynamicModel(raw: RawCatalogModel): CommandCodeGoModel | undefined {
   const contextWindow =
     typeof raw.context_length === "number" && raw.context_length > 0 ? raw.context_length : 1_000_000;
   const declaredMax =
-    typeof raw.maxOutputTokens === "number" ? raw.maxOutputTokens : DEFAULT_MAX_TOKENS;
+    typeof raw.maxOutputTokens === "number" ? raw.maxOutputTokens : MAX_OUTPUT_TOKENS;
   const defaultLevel = efforts.includes("high")
     ? "high"
     : (efforts.find((level) => level !== "off") ?? undefined);

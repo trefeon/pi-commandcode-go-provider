@@ -97,16 +97,16 @@ The catalog is generated from upstream and contains every Go-plan model (58 rows
 
 | ID | Name | Context | Max Output | Reasoning Efforts | Modalities |
 |---|---|---|---|---|---|
-| `deepseek-v4.1-flash` | DeepSeek V4.1 Flash (latest) | 1M | 64K | off, low, high, max | text, image |
-| `deepseek-v4-pro` | DeepSeek V4 Pro (latest) | 1M | 64K | off, high, max | text |
-| `gpt-6-luna` | GPT-6 Luna | 1.05M | 64K | low, medium, high, xhigh, max | text, image |
+| `deepseek-v4.1-flash` | DeepSeek V4.1 Flash (latest) | 1M | 200K | off, low, high, max | text, image |
+| `deepseek-v4-pro` | DeepSeek V4 Pro (latest) | 1M | 200K | off, high, max | text |
+| `gpt-6-luna` | GPT-6 Luna | 1.05M | 200K | low, medium, high, xhigh, max | text, image |
 | `glm-5.3-flash` | GLM-5.3 Flash | 1.05M | 131K | low, high, max | text, image |
-| `kimi-k2.7-code` | Kimi K2.7 Code | 256K | 64K | auto | text, image |
-| `minimax-m3` | MiniMax M3 | 1M | 64K | low, medium, high | text, image |
-| `qwen3.7-plus` | Qwen 3.7 Plus | 1M | 64K | auto | text, image |
-| `step-3.7-flash` | Step 3.7 Flash | 256K | 64K | auto | text, image |
-| `muse-ember` | Muse Ember | 1.05M | 64K | low, medium, high, xhigh, max | text, image |
-| `grok-4.5` | Grok 4.5 | 500K | 64K | low, medium, high | text, image |
+| `kimi-k2.7-code` | Kimi K2.7 Code | 256K | 200K | auto | text, image |
+| `minimax-m3` | MiniMax M3 | 1M | 200K | low, medium, high | text, image |
+| `qwen3.7-plus` | Qwen 3.7 Plus | 1M | 200K | auto | text, image |
+| `step-3.7-flash` | Step 3.7 Flash | 256K | 200K | auto | text, image |
+| `muse-ember` | Muse Ember | 1.05M | 200K | low, medium, high, xhigh, max | text, image |
+| `grok-4.5` | Grok 4.5 | 500K | 200K | low, medium, high | text, image |
 | `mistral-large-4` | Mistral Large 4 | 524K | 200K | low, medium, high | text, image |
 | `glyph-cluster-free` | Glyph Cluster | 256K | 200K | low, medium, high, xhigh | text |
 
@@ -123,7 +123,7 @@ Models above the Go plan (Claude, GPT-5.x Pro/Max, Gemini, etc.) are filtered ou
 - **Tool inputs:** official-CLI parity (`coerceToolInput`): single-element array unwrap, JSON-string parse, bare-string root wrapping, plus smashed-key repair for reasoning models.
 - **Tool results:** accepts OMP's `role: "toolResult"`, Pi's `role: "tool"`, and any message carrying a `toolCallId`, emitting one wire `tool` turn per result with the original call id and tool name.
 - **Stream parsing:** text and reasoning deltas, `tool-call` frames, usage totals, finish reasons, and mid-stream error events.
-- **Output budget:** `max_tokens` is clamped to the gateway ceiling (200,000). When upstream reports a lower ceiling in a 400 response, the request is retried once with that value, so long-session continuation never fails on a stale model cap.
+- **Output budget:** `max_tokens` uses each model's upstream declared cap, or the full gateway ceiling (200,000) when upstream declares none. The gateway hard-rejects anything above 200,000 — verified against models that declare 256K/262K — so 200K is the highest the endpoint accepts. If upstream ever reports a lower cap in a 400, the request retries once with that value.
 
 ---
 

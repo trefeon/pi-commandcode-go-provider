@@ -8,7 +8,7 @@
 
 import { writeFileSync, readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { clampMaxTokens, DEFAULT_MAX_TOKENS, MAX_OUTPUT_TOKENS } from "../src/protocol.js";
+import { clampMaxTokens, MAX_OUTPUT_TOKENS } from "../src/protocol.js";
 
 const CATALOG_URL = "https://api.commandcode.ai/provider/v1/models?view=client";
 const GO_PLAN = "individual-go";
@@ -73,7 +73,7 @@ function toModel(raw: RawModel): GeneratedModel | undefined {
   const modalities = Array.isArray(raw.inputModalities)
     ? raw.inputModalities.filter((m): m is string => m === "text" || m === "image")
     : [];
-  const declaredMax = numberOr(raw.maxOutputTokens, DEFAULT_MAX_TOKENS);
+  const declaredMax = numberOr(raw.maxOutputTokens, MAX_OUTPUT_TOKENS);
   const defaultLevel = efforts.includes("high") ? "high" : efforts.find((level) => level !== "off");
   const label =
     typeof raw.display?.label === "string"

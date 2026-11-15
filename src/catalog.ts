@@ -102,7 +102,8 @@ export function resolveModel(id: string): CommandCodeGoModel {
     id,
     name: `${id} (Go)`,
     contextWindow: 1_000_000,
-    maxTokens: 64_000,
+    // Gateway ceiling; see MAX_OUTPUT_TOKENS in protocol.ts.
+    maxTokens: 200_000,
     reasoning: true,
     efforts: STANDARD_EFFORTS,
     thinking: { mode: "effort", efforts: STANDARD_EFFORTS, defaultLevel: "medium" },
