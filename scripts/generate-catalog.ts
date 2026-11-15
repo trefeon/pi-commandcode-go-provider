@@ -25,7 +25,12 @@ interface RawModel {
   maxOutputTokens?: unknown;
   inputModalities?: unknown;
   reasoningEfforts?: unknown;
-  pricing?: { inputCost?: unknown; outputCost?: unknown; cacheReadCost?: unknown };
+  pricing?: {
+    inputCost?: unknown;
+    outputCost?: unknown;
+    cacheReadCost?: unknown;
+    contextTiers?: Array<{ maxContext?: unknown; rates?: Record<string, unknown> }>;
+  };
   display?: { label?: unknown };
 }
 
@@ -55,6 +60,31 @@ function numberOr(value: unknown, fallback: number): number {
 
 function rate(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+/**
+ * Maps upstream `contextTiers` (ordered; each row rates context up to its
+ * `maxContext`, the last row has none) to the host `cost.tiers` convention
+ * (`inputTokensAbove`: the higher rates apply above this threshold).
+ */
+function toTiers(pricing: RawModel["pricing"]): { inputTokensAbove: number; input: number; output: number; cacheRead: number; cacheWrite: number }[] | undefined {
+  const upstream = pricing?.contextTiers;
+  if (!Array.isArray(upstream)) return undefined;
+  const tiers: { inputTokensAbove: number; input: number; output: number; cacheRead: number; cacheWrite: number }[] = [];
+  for (let i = 0; i < upstream.length; i++) {
+    const step = upstream[i];
+    if (typeof step?.maxContext !== "number") continue;
+    const above = upstream[i + 1]?.rates ?? step.rates;
+    if (!above) continue;
+    tiers.push({
+      inputTokensAbove: step.maxContext,
+      input: rate(above.inputCost),
+      output: rate(above.outputCost),
+      cacheRead: rate(above.cacheReadCost),
+      cacheWrite: rate(above.cacheWriteCost),
+    });
+  }
+  return tiers.length > 0 ? tiers : undefined;
 }
 
 function toModel(raw: RawModel): GeneratedModel | undefined {
@@ -99,6 +129,7 @@ function toModel(raw: RawModel): GeneratedModel | undefined {
       output: rate(raw.pricing?.outputCost),
       cacheRead: rate(raw.pricing?.cacheReadCost),
       cacheWrite: 0,
+      ...(toTiers(raw.pricing) ? { tiers: toTiers(raw.pricing) } : {}),
     },
   };
 }

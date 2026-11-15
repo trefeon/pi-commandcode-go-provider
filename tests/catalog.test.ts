@@ -54,15 +54,15 @@ describe("catalog", () => {
     }
   });
 
-  test("preferredCompactionModelId picks the largest window, then cheapest input", () => {
-    const expected = [...COMMAND_CODE_GO_MODELS].sort(
-      (a, b) =>
-        b.contextWindow - a.contextWindow ||
-        a.cost.input - b.cost.input ||
-        a.id.localeCompare(b.id),
-    )[0]!.id;
-    expect(preferredCompactionModelId()).toBe(expected);
+  test("preferredCompactionModelId picks cheapest tier-aware paid 1M+ model", () => {
+    expect(preferredCompactionModelId()).toBe("muse-spark-1.2-contributor");
     const picked = COMMAND_CODE_GO_MODELS.find((m) => m.id === preferredCompactionModelId())!;
     expect(picked.contextWindow).toBeGreaterThanOrEqual(1_000_000);
+    expect(picked.id.endsWith("-free")).toBe(false);
+    expect(picked.cost.input).toBeGreaterThan(0);
+    // Tiered rows price out worse at compaction sizes than their flat base rates suggest.
+    const qwen = COMMAND_CODE_GO_MODELS.find((m) => m.id === "qwen3.7-flash")!;
+    expect(qwen.cost.input).toBeLessThan(picked.cost.input);
+    expect(qwen.cost.tiers?.some((t) => t.input > picked.cost.input)).toBe(true);
   });
 });
