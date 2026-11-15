@@ -12,7 +12,7 @@ import { COMMAND_CODE_GO_MODELS, registerCatalogModels } from "./src/catalog.js"
 import { loadCachedCatalog, refreshCatalog } from "./src/dynamic-catalog.js";
 import { clampMaxTokens } from "./src/protocol.js";
 import { fetchUsageOverview } from "./src/quota.js";
-import { COMMANDCODE_BUILTIN_ID, commandCodeUsageProvider, COMMANDCODE_GO_ID } from "./src/usage.js";
+import { COMMANDCODE_BUILTIN_ID, commandCodeUsageProvider } from "./src/usage.js";
 import { streamCommandCodeGo } from "./src/stream.js";
 import type {
   CommandCodeGoModel,
@@ -73,7 +73,10 @@ export function createProviderConfig(): ProviderConfig {
     baseUrl: GATEWAY_BASE_URL,
     apiKey: apiKey ?? "COMMANDCODE_API_KEY",
     api: PROVIDER_API,
-    usage: commandCodeUsageProvider(COMMANDCODE_GO_ID),
+    // No `usage` here: registering one synthesizes a reportable account from
+    // this config's apiKey and the dashboard renders the same data twice —
+    // once as "Commandcode" (the overridden built-in id below) and once as
+    // "Commandcode Go". The override on the built-in id is the single source.
     streamSimple: (model: CommandCodeGoModel, context: ContextLike, options?: StreamOptions) => {
       return streamCommandCodeGo(model, context, options);
     },
