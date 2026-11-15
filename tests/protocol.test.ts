@@ -110,7 +110,7 @@ describe("protocol", () => {
 
       expect(req.config).toBeDefined();
       expect(req.config.workingDir).toBeDefined();
-      expect(req.params.model).toBe("deepseek-v4-flash");
+      expect(req.params.model).toBe("deepseek/deepseek-v4-flash");
       expect(req.params.system).toBe("You are an assistant.");
       expect(req.params.reasoning_effort).toBe("high");
       expect(req.params.messages.length).toBe(3);

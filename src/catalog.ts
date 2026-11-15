@@ -13,7 +13,55 @@ const DEFAULT_THINKING_LEVEL_MAP: ThinkingLevelMap = {
 const STANDARD_EFFORTS: readonly string[] = ["off", "low", "medium", "high", "xhigh", "max"];
 
 export const COMMAND_CODE_GO_MODELS: CommandCodeGoModel[] = [
-  // Claude Family
+  // Free Models
+  {
+    id: "thinkingmachines/inkling-2-small:free",
+    name: "Inkling 2 Small (Free)",
+    contextWindow: 1_000_000,
+    maxTokens: 64_000,
+    reasoning: false,
+    input: ["text"],
+    toolCall: true,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  },
+  {
+    id: "stealth/glyph-cluster:free",
+    name: "Glyph Cluster (Free)",
+    contextWindow: 256_000,
+    maxTokens: 131_072,
+    reasoning: true,
+    efforts: ["low", "medium", "high", "xhigh"],
+    thinking: { mode: "effort", efforts: ["low", "medium", "high", "xhigh"], defaultLevel: "medium" },
+    thinkingLevelMap: { off: "low", minimal: "low", low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "xhigh" },
+    input: ["text"],
+    toolCall: true,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  },
+  {
+    id: "inkling-2-small-free",
+    name: "Inkling 2 Small (Free)",
+    contextWindow: 1_000_000,
+    maxTokens: 64_000,
+    reasoning: false,
+    input: ["text"],
+    toolCall: true,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  },
+  {
+    id: "glyph-cluster-free",
+    name: "Glyph Cluster (Free)",
+    contextWindow: 256_000,
+    maxTokens: 131_072,
+    reasoning: true,
+    efforts: ["low", "medium", "high", "xhigh"],
+    thinking: { mode: "effort", efforts: ["low", "medium", "high", "xhigh"], defaultLevel: "medium" },
+    thinkingLevelMap: { off: "low", minimal: "low", low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "xhigh" },
+    input: ["text"],
+    toolCall: true,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  },
+
+  // Claude Family (no prefix upstream)
   {
     id: "claude-haiku-4-5-20251001",
     name: "Claude Haiku 4.5 (Go)",
@@ -64,7 +112,7 @@ export const COMMAND_CODE_GO_MODELS: CommandCodeGoModel[] = [
     cost: { input: 2.0, output: 10.0, cacheRead: 0.2, cacheWrite: 2.5 },
   },
 
-  // GPT Family
+  // GPT Family (no prefix upstream)
   {
     id: "gpt-5.3-codex",
     name: "GPT-5.3 Codex (Go)",
@@ -120,7 +168,7 @@ export const COMMAND_CODE_GO_MODELS: CommandCodeGoModel[] = [
 
   // DeepSeek Family
   {
-    id: "deepseek-v4-flash",
+    id: "deepseek/deepseek-v4-flash",
     name: "DeepSeek V4 Flash (Go)",
     contextWindow: 1_000_000,
     maxTokens: 384_000,
@@ -133,7 +181,7 @@ export const COMMAND_CODE_GO_MODELS: CommandCodeGoModel[] = [
     cost: { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0 },
   },
   {
-    id: "deepseek-v4-pro",
+    id: "deepseek/deepseek-v4-pro",
     name: "DeepSeek V4 Pro (Go)",
     contextWindow: 1_000_000,
     maxTokens: 384_000,
@@ -148,7 +196,7 @@ export const COMMAND_CODE_GO_MODELS: CommandCodeGoModel[] = [
 
   // Gemini Family
   {
-    id: "gemini-3.1-flash-lite",
+    id: "google/gemini-3.1-flash-lite",
     name: "Gemini 3.1 Flash Lite (Go)",
     contextWindow: 1_000_000,
     maxTokens: 65_536,
@@ -161,7 +209,7 @@ export const COMMAND_CODE_GO_MODELS: CommandCodeGoModel[] = [
     cost: { input: 0.075, output: 0.3, cacheRead: 0.01875, cacheWrite: 0 },
   },
   {
-    id: "gemini-3.5-flash",
+    id: "google/gemini-3.5-flash",
     name: "Gemini 3.5 Flash (Go)",
     contextWindow: 1_000_000,
     maxTokens: 65_536,
@@ -176,7 +224,7 @@ export const COMMAND_CODE_GO_MODELS: CommandCodeGoModel[] = [
 
   // GLM Family
   {
-    id: "glm-5",
+    id: "zai-org/GLM-5",
     name: "GLM-5 (Go)",
     contextWindow: 200_000,
     maxTokens: 131_072,
@@ -186,7 +234,7 @@ export const COMMAND_CODE_GO_MODELS: CommandCodeGoModel[] = [
     cost: { input: 1.0, output: 3.2, cacheRead: 0.2, cacheWrite: 0 },
   },
   {
-    id: "glm-5.1",
+    id: "zai-org/GLM-5.1",
     name: "GLM-5.1 (Go)",
     contextWindow: 200_000,
     maxTokens: 131_072,
@@ -196,7 +244,7 @@ export const COMMAND_CODE_GO_MODELS: CommandCodeGoModel[] = [
     cost: { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 },
   },
   {
-    id: "glm-5.2",
+    id: "zai-org/GLM-5.2",
     name: "GLM-5.2 (Go)",
     contextWindow: 1_000_000,
     maxTokens: 131_072,
@@ -211,7 +259,7 @@ export const COMMAND_CODE_GO_MODELS: CommandCodeGoModel[] = [
 
   // Kimi Family
   {
-    id: "kimi-k2.5",
+    id: "moonshotai/Kimi-K2.5",
     name: "Kimi K2.5 (Go)",
     contextWindow: 256_000,
     maxTokens: 131_072,
@@ -221,7 +269,7 @@ export const COMMAND_CODE_GO_MODELS: CommandCodeGoModel[] = [
     cost: { input: 0.6, output: 3.0, cacheRead: 0.1, cacheWrite: 0 },
   },
   {
-    id: "kimi-k2.6",
+    id: "moonshotai/Kimi-K2.6",
     name: "Kimi K2.6 (Go)",
     contextWindow: 256_000,
     maxTokens: 131_072,
@@ -231,7 +279,7 @@ export const COMMAND_CODE_GO_MODELS: CommandCodeGoModel[] = [
     cost: { input: 0.95, output: 4.0, cacheRead: 0.16, cacheWrite: 0 },
   },
   {
-    id: "kimi-k2.7-code",
+    id: "moonshotai/Kimi-K2.7-Code",
     name: "Kimi K2.7 Code (Go)",
     contextWindow: 262_144,
     maxTokens: 131_072,
@@ -244,7 +292,7 @@ export const COMMAND_CODE_GO_MODELS: CommandCodeGoModel[] = [
     cost: { input: 0.95, output: 4.0, cacheRead: 0.19, cacheWrite: 0 },
   },
   {
-    id: "kimi-k2.7-code-highspeed",
+    id: "moonshotai/Kimi-K2.7-Code-Highspeed",
     name: "Kimi K2.7 Code HighSpeed (Go)",
     contextWindow: 262_144,
     maxTokens: 131_072,
@@ -259,7 +307,7 @@ export const COMMAND_CODE_GO_MODELS: CommandCodeGoModel[] = [
 
   // MiniMax Family
   {
-    id: "minimax-m2.5",
+    id: "MiniMaxAI/MiniMax-M2.5",
     name: "MiniMax M2.5 (Go)",
     contextWindow: 200_000,
     maxTokens: 131_072,
@@ -269,7 +317,7 @@ export const COMMAND_CODE_GO_MODELS: CommandCodeGoModel[] = [
     cost: { input: 0.3, output: 1.2, cacheRead: 0.05, cacheWrite: 0 },
   },
   {
-    id: "minimax-m2.7",
+    id: "MiniMaxAI/MiniMax-M2.7",
     name: "MiniMax M2.7 (Go)",
     contextWindow: 1_000_000,
     maxTokens: 131_072,
@@ -279,7 +327,7 @@ export const COMMAND_CODE_GO_MODELS: CommandCodeGoModel[] = [
     cost: { input: 0.4, output: 1.6, cacheRead: 0.08, cacheWrite: 0 },
   },
   {
-    id: "minimax-m3",
+    id: "MiniMaxAI/MiniMax-M3",
     name: "MiniMax M3 (Go)",
     contextWindow: 1_000_000,
     maxTokens: 524_288,
@@ -294,7 +342,7 @@ export const COMMAND_CODE_GO_MODELS: CommandCodeGoModel[] = [
 
   // Qwen Family
   {
-    id: "qwen3.6-max-preview",
+    id: "Qwen/Qwen3.6-Max-Preview",
     name: "Qwen 3.6 Max Preview (Go)",
     contextWindow: 1_000_000,
     maxTokens: 131_072,
@@ -307,7 +355,7 @@ export const COMMAND_CODE_GO_MODELS: CommandCodeGoModel[] = [
     cost: { input: 1.6, output: 6.4, cacheRead: 0.4, cacheWrite: 0 },
   },
   {
-    id: "qwen3.6-plus",
+    id: "Qwen/Qwen3.6-Plus",
     name: "Qwen 3.6 Plus (Go)",
     contextWindow: 1_000_000,
     maxTokens: 131_072,
@@ -320,7 +368,7 @@ export const COMMAND_CODE_GO_MODELS: CommandCodeGoModel[] = [
     cost: { input: 0.8, output: 3.2, cacheRead: 0.2, cacheWrite: 0 },
   },
   {
-    id: "qwen3.7-max",
+    id: "Qwen/Qwen3.7-Max",
     name: "Qwen 3.7 Max (Go)",
     contextWindow: 1_000_000,
     maxTokens: 131_072,
@@ -333,7 +381,7 @@ export const COMMAND_CODE_GO_MODELS: CommandCodeGoModel[] = [
     cost: { input: 2.0, output: 8.0, cacheRead: 0.5, cacheWrite: 0 },
   },
   {
-    id: "qwen3.7-plus",
+    id: "Qwen/Qwen3.7-Plus",
     name: "Qwen 3.7 Plus (Go)",
     contextWindow: 1_000_000,
     maxTokens: 131_072,
@@ -345,10 +393,179 @@ export const COMMAND_CODE_GO_MODELS: CommandCodeGoModel[] = [
     toolCall: true,
     cost: { input: 1.0, output: 4.0, cacheRead: 0.25, cacheWrite: 0 },
   },
+  {
+    id: "Qwen/Qwen3.7-Flash",
+    name: "Qwen 3.7 Flash (Go)",
+    contextWindow: 1_000_000,
+    maxTokens: 131_072,
+    reasoning: true,
+    efforts: ["low", "medium", "high"],
+    thinking: { mode: "effort", efforts: ["low", "medium", "high"], defaultLevel: "medium" },
+    thinkingLevelMap: { off: "low", minimal: "low", low: "low", medium: "medium", high: "high", xhigh: "high", max: "high" },
+    input: ["text", "image"],
+    toolCall: true,
+    cost: { input: 0.03, output: 0.13, cacheRead: 0.006, cacheWrite: 0.038 },
+  },
+  {
+    id: "qwen3.7-flash",
+    name: "Qwen 3.7 Flash (Go)",
+    contextWindow: 1_000_000,
+    maxTokens: 131_072,
+    reasoning: true,
+    efforts: ["low", "medium", "high"],
+    thinking: { mode: "effort", efforts: ["low", "medium", "high"], defaultLevel: "medium" },
+    thinkingLevelMap: { off: "low", minimal: "low", low: "low", medium: "medium", high: "high", xhigh: "high", max: "high" },
+    input: ["text", "image"],
+    toolCall: true,
+    cost: { input: 0.03, output: 0.13, cacheRead: 0.006, cacheWrite: 0.038 },
+  },
+  {
+    id: "gpt-6-luna",
+    name: "GPT-6 Luna (Go)",
+    contextWindow: 1_100_000,
+    maxTokens: 128_000,
+    reasoning: true,
+    efforts: ["low", "medium", "high", "xhigh", "max"],
+    thinking: { mode: "effort", efforts: ["low", "medium", "high", "xhigh", "max"], defaultLevel: "medium" },
+    thinkingLevelMap: DEFAULT_THINKING_LEVEL_MAP,
+    input: ["text", "image"],
+    toolCall: true,
+    cost: { input: 0.10, output: 0.50, cacheRead: 0.01, cacheWrite: 0.125 },
+  },
+  {
+    id: "deepseek/deepseek-v4.1-flash",
+    name: "DeepSeek V4.1 Flash (Go)",
+    contextWindow: 1_000_000,
+    maxTokens: 384_000,
+    reasoning: true,
+    efforts: ["off", "high", "max"],
+    thinking: { mode: "effort", efforts: ["off", "high", "max"], defaultLevel: "high" },
+    thinkingLevelMap: { off: "off", minimal: "high", low: "high", medium: "high", high: "high", xhigh: "max", max: "max" },
+    input: ["text", "image"],
+    toolCall: true,
+    cost: { input: 0.15, output: 0.60, cacheRead: 0.003, cacheWrite: 0 },
+  },
+  {
+    id: "deepseek-v4.1-flash",
+    name: "DeepSeek V4.1 Flash (Go)",
+    contextWindow: 1_000_000,
+    maxTokens: 384_000,
+    reasoning: true,
+    efforts: ["off", "high", "max"],
+    thinking: { mode: "effort", efforts: ["off", "high", "max"], defaultLevel: "high" },
+    thinkingLevelMap: { off: "off", minimal: "high", low: "high", medium: "high", high: "high", xhigh: "max", max: "max" },
+    input: ["text", "image"],
+    toolCall: true,
+    cost: { input: 0.15, output: 0.60, cacheRead: 0.003, cacheWrite: 0 },
+  },
+  {
+    id: "meta/muse-ember",
+    name: "Muse Ember (Go)",
+    contextWindow: 1_000_000,
+    maxTokens: 64_000,
+    reasoning: true,
+    efforts: ["low", "medium", "high"],
+    thinking: { mode: "effort", efforts: ["low", "medium", "high"], defaultLevel: "medium" },
+    thinkingLevelMap: { off: "low", minimal: "low", low: "low", medium: "medium", high: "high", xhigh: "high", max: "high" },
+    input: ["text"],
+    toolCall: true,
+    cost: { input: 0.10, output: 0.50, cacheRead: 0.004, cacheWrite: 0 },
+  },
+  {
+    id: "muse-ember",
+    name: "Muse Ember (Go)",
+    contextWindow: 1_000_000,
+    maxTokens: 64_000,
+    reasoning: true,
+    efforts: ["low", "medium", "high"],
+    thinking: { mode: "effort", efforts: ["low", "medium", "high"], defaultLevel: "medium" },
+    thinkingLevelMap: { off: "low", minimal: "low", low: "low", medium: "medium", high: "high", xhigh: "high", max: "high" },
+    input: ["text"],
+    toolCall: true,
+    cost: { input: 0.10, output: 0.50, cacheRead: 0.004, cacheWrite: 0 },
+  },
+  {
+    id: "minimax/minimax-m3.1-flash",
+    name: "MiniMax M3.1 Flash (Go)",
+    contextWindow: 1_000_000,
+    maxTokens: 131_072,
+    reasoning: true,
+    efforts: ["low", "medium", "high"],
+    thinking: { mode: "effort", efforts: ["low", "medium", "high"], defaultLevel: "medium" },
+    thinkingLevelMap: { off: "low", minimal: "low", low: "low", medium: "medium", high: "high", xhigh: "high", max: "high" },
+    input: ["text", "image"],
+    toolCall: true,
+    cost: { input: 0.15, output: 0.60, cacheRead: 0.015, cacheWrite: 0 },
+  },
+  {
+    id: "minimax-m3.1-flash",
+    name: "MiniMax M3.1 Flash (Go)",
+    contextWindow: 1_000_000,
+    maxTokens: 131_072,
+    reasoning: true,
+    efforts: ["low", "medium", "high"],
+    thinking: { mode: "effort", efforts: ["low", "medium", "high"], defaultLevel: "medium" },
+    thinkingLevelMap: { off: "low", minimal: "low", low: "low", medium: "medium", high: "high", xhigh: "high", max: "high" },
+    input: ["text", "image"],
+    toolCall: true,
+    cost: { input: 0.15, output: 0.60, cacheRead: 0.015, cacheWrite: 0 },
+  },
+  {
+    id: "mimo-v2.6-flash",
+    name: "MiMo V2.6 Flash (Go)",
+    contextWindow: 1_000_000,
+    maxTokens: 131_072,
+    reasoning: true,
+    efforts: ["low", "medium", "high"],
+    thinking: { mode: "effort", efforts: ["low", "medium", "high"], defaultLevel: "medium" },
+    thinkingLevelMap: { off: "low", minimal: "low", low: "low", medium: "medium", high: "high", xhigh: "high", max: "high" },
+    input: ["text", "image"],
+    toolCall: true,
+    cost: { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0 },
+  },
+  {
+    id: "xiaomi/mimo-v2.6-flash",
+    name: "MiMo V2.6 Flash (Go)",
+    contextWindow: 1_000_000,
+    maxTokens: 131_072,
+    reasoning: true,
+    efforts: ["low", "medium", "high"],
+    thinking: { mode: "effort", efforts: ["low", "medium", "high"], defaultLevel: "medium" },
+    thinkingLevelMap: { off: "low", minimal: "low", low: "low", medium: "medium", high: "high", xhigh: "high", max: "high" },
+    input: ["text", "image"],
+    toolCall: true,
+    cost: { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0 },
+  },
+  {
+    id: "z-ai/glm-5.3-flash",
+    name: "GLM-5.3 Flash (Go)",
+    contextWindow: 1_000_000,
+    maxTokens: 131_072,
+    reasoning: true,
+    efforts: ["low", "high", "max"],
+    thinking: { mode: "effort", efforts: ["low", "high", "max"], defaultLevel: "high" },
+    thinkingLevelMap: { off: "low", minimal: "low", low: "low", medium: "high", high: "high", xhigh: "max", max: "max" },
+    input: ["text", "image"],
+    toolCall: true,
+    cost: { input: 0.15, output: 0.50, cacheRead: 0.03, cacheWrite: 0 },
+  },
+  {
+    id: "glm-5.3-flash",
+    name: "GLM-5.3 Flash (Go)",
+    contextWindow: 1_000_000,
+    maxTokens: 131_072,
+    reasoning: true,
+    efforts: ["low", "high", "max"],
+    thinking: { mode: "effort", efforts: ["low", "high", "max"], defaultLevel: "high" },
+    thinkingLevelMap: { off: "low", minimal: "low", low: "low", medium: "high", high: "high", xhigh: "max", max: "max" },
+    input: ["text", "image"],
+    toolCall: true,
+    cost: { input: 0.15, output: 0.50, cacheRead: 0.03, cacheWrite: 0 },
+  },
 
   // Step Family
   {
-    id: "step-3.5-flash",
+    id: "stepfun/Step-3.5-Flash",
     name: "Step 3.5 Flash (Go)",
     contextWindow: 1_000_000,
     maxTokens: 131_072,
@@ -361,7 +578,7 @@ export const COMMAND_CODE_GO_MODELS: CommandCodeGoModel[] = [
     cost: { input: 0.2, output: 0.8, cacheRead: 0.05, cacheWrite: 0 },
   },
   {
-    id: "step-3.7-flash",
+    id: "stepfun/Step-3.7-Flash",
     name: "Step 3.7 Flash (Go)",
     contextWindow: 1_000_000,
     maxTokens: 131_072,
@@ -376,7 +593,7 @@ export const COMMAND_CODE_GO_MODELS: CommandCodeGoModel[] = [
 
   // MiMo Family
   {
-    id: "mimo-v2.5-pro",
+    id: "xiaomi/mimo-v2.5-pro",
     name: "MiMo V2.5 Pro (Go)",
     contextWindow: 1_000_000,
     maxTokens: 131_072,
@@ -389,7 +606,7 @@ export const COMMAND_CODE_GO_MODELS: CommandCodeGoModel[] = [
     cost: { input: 0.3, output: 1.2, cacheRead: 0.075, cacheWrite: 0 },
   },
   {
-    id: "mimo-v2.5",
+    id: "xiaomi/mimo-v2.5",
     name: "MiMo V2.5 (Go)",
     contextWindow: 1_000_000,
     maxTokens: 131_072,
@@ -404,7 +621,7 @@ export const COMMAND_CODE_GO_MODELS: CommandCodeGoModel[] = [
 
   // Nemotron
   {
-    id: "nemotron-3-ultra",
+    id: "nvidia/nemotron-3-ultra",
     name: "Nemotron 3 Ultra (Go)",
     contextWindow: 1_000_000,
     maxTokens: 131_072,
@@ -418,28 +635,26 @@ export const COMMAND_CODE_GO_MODELS: CommandCodeGoModel[] = [
   },
 ];
 
-/**
- * Common vendor prefix mappings (e.g. `deepseek/deepseek-v4-flash` -> `deepseek-v4-flash`).
- */
 const ALIAS_PREFIXES = [
   "deepseek/",
   "google/",
   "zai-org/",
   "z-ai/",
   "moonshotai/",
-  "MiniMaxAI/",
+  "minimaxai/",
   "minimax/",
-  "Qwen/",
   "qwen/",
   "stepfun/",
   "xiaomi/",
   "nvidia/",
+  "thinkingmachines/",
+  "stealth/",
 ];
 
 function normalizeModelId(id: string): string {
   const trimmed = id.trim().toLowerCase();
   for (const prefix of ALIAS_PREFIXES) {
-    if (trimmed.startsWith(prefix.toLowerCase())) {
+    if (trimmed.startsWith(prefix)) {
       return trimmed.slice(prefix.length);
     }
   }
@@ -452,9 +667,12 @@ const MODELS_BY_NORMALIZED = new Map<string, CommandCodeGoModel>();
 for (const model of COMMAND_CODE_GO_MODELS) {
   MODELS_BY_ID.set(model.id, model);
   MODELS_BY_NORMALIZED.set(normalizeModelId(model.id), model);
-  // Also register common vendor prefix paths
-  for (const prefix of ALIAS_PREFIXES) {
-    MODELS_BY_NORMALIZED.set(normalizeModelId(`${prefix}${model.id}`), model);
+
+  // Also register bare ID if canonical ID contains a slash
+  if (model.id.includes("/")) {
+    const bare = model.id.split("/")[1];
+    MODELS_BY_ID.set(bare, model);
+    MODELS_BY_NORMALIZED.set(normalizeModelId(bare), model);
   }
 }
 
@@ -486,12 +704,25 @@ export function resolveModel(id: string): CommandCodeGoModel {
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   };
 }
-
 /**
  * Returns the wire model ID expected by upstream /alpha/generate.
- * Upstream accepts canonical IDs without vendor prefixes.
  */
 export function toWireModelId(id: string): string {
+  if (id === "inkling-2-small-free" || id === "thinkingmachines/inkling-2-small-free") {
+    return "thinkingmachines/inkling-2-small:free";
+  }
+  if (id === "glyph-cluster-free" || id === "stealth/glyph-cluster-free") {
+    return "stealth/glyph-cluster:free";
+  }
+  if (id === "qwen3.7-flash") return "Qwen/Qwen3.7-Flash";
+  if (id === "qwen3.7-plus") return "Qwen/Qwen3.7-Plus";
+  if (id === "qwen3.7-max") return "Qwen/Qwen3.7-Max";
+  if (id === "deepseek-v4.1-flash") return "deepseek/deepseek-v4.1-flash";
+  if (id === "deepseek-v4-flash") return "deepseek/deepseek-v4-flash";
+  if (id === "muse-ember") return "meta/muse-ember";
+  if (id === "mimo-v2.6-flash") return "xiaomi/mimo-v2.6-flash";
+  if (id === "glm-5.3-flash") return "z-ai/glm-5.3-flash";
+  if (id === "minimax-m3.1-flash") return "minimax/minimax-m3.1-flash";
   const model = resolveModel(id);
   return model.id;
 }

@@ -9,8 +9,12 @@
     "test": "bun test tests/",
     "typecheck": "tsc --noEmit"
   },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
   "keywords": [
-    "pi-package",
     "pi-extension",
     "omp",
     "commandcode",

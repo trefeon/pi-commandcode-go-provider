@@ -46,7 +46,7 @@ export function createProviderConfig(): ProviderConfig {
   return {
     name: PROVIDER_NAME,
     baseUrl: GATEWAY_BASE_URL,
-    apiKey: apiKey ?? "",
+    apiKey: apiKey ?? "$COMMANDCODE_API_KEY",
     api: PROVIDER_API,
     streamSimple: (model: CommandCodeGoModel, context: ContextLike, options?: StreamOptions) => {
       return streamCommandCodeGo(model, context, options);
