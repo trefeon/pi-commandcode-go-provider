@@ -123,6 +123,7 @@ Models above the Go plan (Claude, GPT-5.x Pro/Max, Gemini, etc.) are filtered ou
 - **Tool inputs:** official-CLI parity (`coerceToolInput`): single-element array unwrap, JSON-string parse, bare-string root wrapping, plus smashed-key repair for reasoning models.
 - **Tool results:** accepts OMP's `role: "toolResult"`, Pi's `role: "tool"`, and any message carrying a `toolCallId`, emitting one wire `tool` turn per result with the original call id and tool name.
 - **Stream parsing:** text and reasoning deltas, `tool-call` frames, usage totals, finish reasons, and mid-stream error events.
+- **Usage accounting:** upstream `inputTokens` is the whole prompt, cache hits included (`noCacheTokens + cacheReadTokens + cacheWriteTokens`). `usage.input` carries only the uncached remainder and `usage.contextTokens` the full prompt, matching the host convention (`input + cacheRead + cacheWrite`). Without this split every cache hit is counted twice and the context gauge doubles — a 570K-token prompt renders at ~105% of a 1M window.
 - **Output budget:** `max_tokens` uses each model's upstream declared cap, or the full gateway ceiling (200,000) when upstream declares none. The gateway hard-rejects anything above 200,000 — verified against models that declare 256K/262K — so 200K is the highest the endpoint accepts. If upstream ever reports a lower cap in a 400, the request retries once with that value.
 
 ---

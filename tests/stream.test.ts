@@ -225,6 +225,57 @@ describe("streamCommandCodeGo", () => {
     expect(events.find((e) => e.type === "done")).toBeDefined();
   });
 
+  test("normalizes cached input so the host gauge matches the gateway prompt", async () => {
+    const mockBody = createMockStream([
+      '{"type":"text-start"}\n',
+      '{"type":"text-delta","text":"ok"}\n',
+      '{"type":"text-end"}\n',
+      JSON.stringify({
+        type: "finish",
+        finishReason: "stop",
+        totalUsage: {
+          inputTokens: 570_477,
+          outputTokens: 305,
+          inputTokenDetails: { noCacheTokens: 5_000, cacheReadTokens: 565_477 },
+        },
+      }) + "\n",
+    ]);
+
+    const mockFetch = async () =>
+      new Response(mockBody, { status: 200, headers: { "content-type": "application/x-ndjson" } });
+
+    const model = resolveModel("deepseek-v4.1-flash");
+    const stream = streamCommandCodeGo(
+      model,
+      { messages: [{ role: "user", content: "Long session" }] },
+      { apiKey: "mock_key", fetch: mockFetch }
+    );
+
+    const events: AssistantMessageEvent[] = [];
+    for await (const event of stream) {
+      events.push(event);
+    }
+
+    const doneEvent = events.find((e) => e.type === "done");
+    expect(doneEvent).toBeDefined();
+    if (!doneEvent || doneEvent.type !== "done") return;
+
+    const { usage } = doneEvent.message;
+    // Hosts compute prompt occupancy as input + cacheRead + cacheWrite, so the
+    // whole prompt must not sit in `input` as well: 570K would render as ~105%.
+    expect(usage.input + usage.cacheRead + usage.cacheWrite).toBe(570_477);
+    expect(usage.contextTokens).toBe(570_477);
+    expect(usage.input).toBe(5_000);
+    expect(usage.cacheRead).toBe(565_477);
+    expect(usage.totalTokens).toBe(570_782);
+
+    const expectedCost =
+      (5_000 / 1_000_000) * model.cost.input +
+      (565_477 / 1_000_000) * model.cost.cacheRead +
+      (305 / 1_000_000) * model.cost.output;
+    expect(usage.cost.total).toBeCloseTo(expectedCost, 10);
+  });
+
   test("emits error event on HTTP 401 / 403 failure without hanging", async () => {
     const mockFetch = async () =>
       new Response(

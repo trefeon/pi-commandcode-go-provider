@@ -29,6 +29,12 @@ export interface Usage {
   cacheWrite: number;
   cacheWrite1h?: number;
   totalTokens: number;
+  /**
+   * Provider-reported prompt occupancy in tokens, including cached input.
+   * Hosts anchor the context gauge on this when present instead of
+   * re-adding `input + cacheRead + cacheWrite`.
+   */
+  contextTokens?: number;
   cost: UsageCost;
 }
 

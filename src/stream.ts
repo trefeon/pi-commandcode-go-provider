@@ -24,10 +24,58 @@ import type {
   TextContent,
   ThinkingContent,
   ToolCallContent,
+  Usage,
 } from "./types.js";
 import { isRecord } from "./types.js";
 
 const DEFAULT_TIMEOUT_MS = 300_000;
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/**
+ * Maps the gateway's AI-SDK usage onto the host convention.
+ *
+ * Upstream `inputTokens` is the whole prompt (`noCacheTokens + cacheReadTokens
+ * + cacheWriteTokens`). Hosts derive prompt occupancy as `input + cacheRead +
+ * cacheWrite`, so `input` must hold the uncached remainder: storing the whole
+ * prompt there counts every cache hit twice and inflates the context gauge
+ * (a 570K-token prompt renders past 100% of a 1M window). `contextTokens` is
+ * the provider-reported occupancy, which hosts prefer when anchoring the gauge.
+ */
+function applyGatewayUsage(
+  rawUsage: Record<string, unknown>,
+  usage: Usage,
+  model: CommandCodeGoModel
+): void {
+  const details = isRecord(rawUsage.inputTokenDetails) ? rawUsage.inputTokenDetails : undefined;
+  const inputTokens = finiteNumber(rawUsage.inputTokens) ?? usage.input + usage.cacheRead + usage.cacheWrite;
+  const outputTokens = finiteNumber(rawUsage.outputTokens) ?? usage.output;
+  const cacheRead = finiteNumber(details?.cacheReadTokens) ?? usage.cacheRead;
+  const cacheWrite = finiteNumber(details?.cacheWriteTokens) ?? usage.cacheWrite;
+  const uncachedInput = details ? Math.max(0, inputTokens - cacheRead - cacheWrite) : inputTokens;
+  const costRate = model.cost;
+
+  usage.input = uncachedInput;
+  usage.output = outputTokens;
+  usage.cacheRead = cacheRead;
+  usage.cacheWrite = cacheWrite;
+  usage.contextTokens = inputTokens;
+  usage.totalTokens = inputTokens + outputTokens;
+
+  const inputCost = (uncachedInput / 1_000_000) * costRate.input;
+  const outputCost = (outputTokens / 1_000_000) * costRate.output;
+  const cacheReadCost = (cacheRead / 1_000_000) * costRate.cacheRead;
+  const cacheWriteCost = (cacheWrite / 1_000_000) * costRate.cacheWrite;
+  usage.cost = {
+    input: inputCost,
+    output: outputCost,
+    cacheRead: cacheReadCost,
+    cacheWrite: cacheWriteCost,
+    total: inputCost + outputCost + cacheReadCost + cacheWriteCost,
+  };
+}
 
 function mapFinishReason(rawReason: unknown, hasToolCalls: boolean): StopReason {
   if (hasToolCalls) return "toolUse";
@@ -319,41 +367,17 @@ export function streamCommandCodeGo(
           }
 
           case "finish-step": {
-            const usageObj = isRecord(event.usage) ? event.usage : event;
-            if (typeof usageObj.inputTokens === "number") {
-              message.usage.input = usageObj.inputTokens;
-            }
-            if (typeof usageObj.outputTokens === "number") {
-              message.usage.output = usageObj.outputTokens;
-            }
+            applyGatewayUsage(isRecord(event.usage) ? event.usage : event, message.usage, model);
             break;
           }
 
           case "finish": {
-            const rawUsage = (isRecord(event.totalUsage) ? event.totalUsage : isRecord(event.usage) ? event.usage : {}) as Record<string, unknown>;
-            const inputTokens = typeof rawUsage.inputTokens === "number" ? rawUsage.inputTokens : message.usage.input;
-            const outputTokens = typeof rawUsage.outputTokens === "number" ? rawUsage.outputTokens : message.usage.output;
-            const cacheRead = typeof (rawUsage.inputTokenDetails as Record<string, unknown> | undefined)?.cacheReadTokens === "number"
-              ? (rawUsage.inputTokenDetails as Record<string, unknown>).cacheReadTokens as number
-              : 0;
-
-            message.usage.input = inputTokens;
-            message.usage.output = outputTokens;
-            message.usage.cacheRead = cacheRead;
-            message.usage.totalTokens = inputTokens + outputTokens;
-
-            // Compute estimated costs
-            const costRate = model.cost;
-            const inputCost = (inputTokens / 1_000_000) * costRate.input;
-            const outputCost = (outputTokens / 1_000_000) * costRate.output;
-            const cacheCost = (cacheRead / 1_000_000) * costRate.cacheRead;
-            message.usage.cost = {
-              input: inputCost,
-              output: outputCost,
-              cacheRead: cacheCost,
-              cacheWrite: 0,
-              total: inputCost + outputCost + cacheCost,
-            };
+            const rawUsage = isRecord(event.totalUsage)
+              ? event.totalUsage
+              : isRecord(event.usage)
+                ? event.usage
+                : {};
+            applyGatewayUsage(rawUsage, message.usage, model);
 
             // Close any open text or thinking blocks
             if (currentTextBlock && currentTextIndex >= 0) {
