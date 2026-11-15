@@ -2,14 +2,23 @@ import { describe, expect, test } from "bun:test";
 import { COMMAND_CODE_GO_MODELS, resolveModel, toWireModelId } from "../src/catalog.js";
 
 describe("catalog", () => {
-  test("contains at least 30 Command Code Go models with zero duplicates", () => {
-    expect(COMMAND_CODE_GO_MODELS.length).toBeGreaterThanOrEqual(30);
+  test("contains only Go-tier models with zero duplicates", () => {
+    expect(COMMAND_CODE_GO_MODELS.length).toBeGreaterThanOrEqual(20);
     const ids = COMMAND_CODE_GO_MODELS.map((m) => m.id);
     const uniqueIds = new Set(ids);
     expect(uniqueIds.size).toBe(ids.length);
+    for (const unavailable of [
+      "gpt-5.4",
+      "gpt-5.5",
+      "claude-sonnet-5",
+      "claude-opus-4-7",
+      "claude-haiku-4-5-20251001",
+    ]) {
+      expect(ids).not.toContain(unavailable);
+    }
   });
 
-  test("contains key flagship models without duplicate prefixes", () => {
+  test("contains key flagship Go models without duplicate prefixes", () => {
     const ids = COMMAND_CODE_GO_MODELS.map((m) => m.id);
     expect(ids).toContain("inkling-2-small-free");
     expect(ids).toContain("glyph-cluster-free");
@@ -18,12 +27,12 @@ describe("catalog", () => {
     expect(ids).toContain("kimi-k2.7-code");
     expect(ids).toContain("minimax-m3");
     expect(ids).toContain("qwen3.7-plus");
-    expect(ids).toContain("gpt-5.4");
-    expect(ids).toContain("claude-sonnet-5");
+    expect(ids).toContain("gpt-6-luna");
+    expect(ids).toContain("muse-ember");
   });
   test("normalizes vendor prefixes to wire model IDs", () => {
     expect(toWireModelId("deepseek-v4.1-flash")).toBe("deepseek/deepseek-v4.1-flash");
-    expect(toWireModelId("deepseek-v4-flash")).toBe("deepseek/deepseek-v4.1-flash");
+    expect(toWireModelId("deepseek-v4-flash")).toBe("deepseek/deepseek-v4-flash");
     expect(toWireModelId("kimi-k2.7-code")).toBe("moonshotai/Kimi-K2.7-Code");
     expect(toWireModelId("minimax-m3")).toBe("MiniMaxAI/MiniMax-M3");
     expect(toWireModelId("qwen3.7-plus")).toBe("Qwen/Qwen3.7-Plus");

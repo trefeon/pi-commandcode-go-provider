@@ -8,8 +8,9 @@
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { hasApiKey, resolveApiKey } from "./src/auth.js";
-import { COMMAND_CODE_GO_MODELS, resolveModel } from "./src/catalog.js";
+import { COMMAND_CODE_GO_MODELS, registerCatalogModels } from "./src/catalog.js";
 import { loadCachedCatalog, refreshCatalog } from "./src/dynamic-catalog.js";
+import { clampMaxTokens } from "./src/protocol.js";
 import { fetchQuota } from "./src/quota.js";
 import { streamCommandCodeGo } from "./src/stream.js";
 import type {
@@ -37,19 +38,20 @@ function toProviderModelConfig(model: CommandCodeGoModel): ProviderModelConfig {
     thinkingLevelMap: model.thinkingLevelMap,
     input: model.input ? [...model.input] : ["text"],
     contextWindow: model.contextWindow,
-    maxTokens: model.maxTokens,
+    maxTokens: clampMaxTokens(model.maxTokens),
     cost: model.cost,
   };
 }
 
 export function createProviderConfig(): ProviderConfig {
+  registerCatalogModels(loadCachedCatalog());
   const initialModels = loadCachedCatalog().map(toProviderModelConfig);
   const apiKey = resolveApiKey();
 
   return {
     name: PROVIDER_NAME,
     baseUrl: GATEWAY_BASE_URL,
-    apiKey: apiKey ?? "$COMMANDCODE_API_KEY",
+    apiKey: apiKey ?? "COMMANDCODE_API_KEY",
     api: PROVIDER_API,
     streamSimple: (model: CommandCodeGoModel, context: ContextLike, options?: StreamOptions) => {
       return streamCommandCodeGo(model, context, options);
@@ -57,11 +59,13 @@ export function createProviderConfig(): ProviderConfig {
     models: initialModels,
     // OMP uses fetchDynamicModels (merged with static fallback)
     fetchDynamicModels: async () => {
-      return COMMAND_CODE_GO_MODELS.map(toProviderModelConfig);
+      const res = await refreshCatalog();
+      return res.models.map(toProviderModelConfig);
     },
     // Pi uses refreshModels (replaces catalog; must not return empty)
     refreshModels: async () => {
-      return COMMAND_CODE_GO_MODELS.map(toProviderModelConfig);
+      const res = await refreshCatalog();
+      return res.models.map(toProviderModelConfig);
     },
     oauth: {
       name: PROVIDER_NAME,
@@ -163,7 +167,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
       description: "Auto-refresh model catalog from Command Code upstream",
       handler: async (_args: string, ctx: ExtensionContext) => {
         ctx.ui?.notify("Checking for new Command Code models upstream...", "info");
-        const { models, newCount } = await refreshCatalog();
+        const { models, newCount } = await refreshCatalog(true);
         const msg = newCount > 0
           ? `Found ${newCount} new model(s)! Total catalog: ${models.length} models.`
           : `Catalog is up to date (${models.length} models available).`;

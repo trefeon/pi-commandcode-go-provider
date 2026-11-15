@@ -9,6 +9,7 @@ import {
   dropNullArguments,
   gatewayErrorDetail,
   parseEventStream,
+  parseMaxTokensCap,
   sanitizeToolCallId,
 } from "./protocol.js";
 import type {
@@ -104,7 +105,6 @@ export function streamCommandCodeGo(
 
     try {
       const gatewayUrl = process.env.COMMANDCODE_GO_URL || DEFAULT_GATEWAY_URL;
-      const requestBody = buildRequest(model.id, context, options);
 
       const headers: Record<string, string> = {
         authorization: `Bearer ${apiKey}`,
@@ -122,18 +122,34 @@ export function streamCommandCodeGo(
       }
 
       const fetchImpl = options?.fetch ?? fetch;
-      const response = await fetchImpl(gatewayUrl, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(requestBody),
-        signal,
-      });
 
-      if (!response.ok) {
-        const rawError = await response.text().catch(() => "");
-        const detail = gatewayErrorDetail(rawError);
+      // A gateway validation error can still cap max_tokens below our ceiling
+      // (or below a stale model row). Retry once with the ceiling it reports.
+      let attemptOptions = options;
+      let response: Response | undefined;
+      let failureDetail = "";
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const requestBody = buildRequest(model.id, context, attemptOptions);
+        const requestedMax = (requestBody.params as { max_tokens?: number }).max_tokens;
+
+        response = await fetchImpl(gatewayUrl, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(requestBody),
+          signal,
+        });
+        if (response.ok) break;
+
+        failureDetail = gatewayErrorDetail(await response.text().catch(() => ""));
+        const cap =
+          attempt === 0 && response.status === 400 ? parseMaxTokensCap(failureDetail) : undefined;
+        if (cap === undefined || (typeof requestedMax === "number" && requestedMax <= cap)) break;
+        attemptOptions = { ...options, maxTokens: cap };
+      }
+
+      if (!response || !response.ok) {
         message.stopReason = "error";
-        message.errorMessage = `HTTP ${response.status} from Command Code gateway: ${detail}`;
+        message.errorMessage = `HTTP ${response?.status ?? 0} from Command Code gateway: ${failureDetail || "Unknown error"}`;
         stream.push({ type: "error", reason: "error", error: message });
         return;
       }

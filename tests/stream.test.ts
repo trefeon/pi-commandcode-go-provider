@@ -176,6 +176,55 @@ describe("streamCommandCodeGo", () => {
     }
   });
 
+  test("retries once with the max_tokens ceiling named by a 400", async () => {
+    const bodies: string[] = [];
+    const okBody = createMockStream([
+      '{"type":"text-start"}\n',
+      '{"type":"text-delta","text":"ok"}\n',
+      '{"type":"text-end"}\n',
+      '{"type":"finish","finishReason":"stop"}\n',
+    ]);
+
+    const mockFetch = async (_url: string | URL | Request, init?: RequestInit) => {
+      bodies.push(String(init?.body ?? ""));
+      if (bodies.length === 1) {
+        return new Response(
+          JSON.stringify({
+            error: {
+              message:
+                'Invalid request error. Validation error: Too big: expected number to be <=131072 at "params.max_tokens"',
+              code: "BAD_REQUEST",
+            },
+          }),
+          { status: 400, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(okBody, {
+        status: 200,
+        headers: { "content-type": "application/x-ndjson" },
+      });
+    };
+
+    const stream = streamCommandCodeGo(
+      resolveModel("deepseek-v4.1-flash"),
+      { messages: [{ role: "user", content: "Continue the session" }] },
+      { apiKey: "mock_key", maxTokens: 200_000, fetch: mockFetch }
+    );
+
+    const events: AssistantMessageEvent[] = [];
+    for await (const event of stream) {
+      events.push(event);
+    }
+
+    expect(bodies.length).toBe(2);
+    const first = JSON.parse(bodies[0]) as { params: { max_tokens: number } };
+    const second = JSON.parse(bodies[1]) as { params: { max_tokens: number } };
+    expect(first.params.max_tokens).toBe(200_000);
+    expect(second.params.max_tokens).toBe(131_072);
+    expect(events.find((e) => e.type === "error")).toBeUndefined();
+    expect(events.find((e) => e.type === "done")).toBeDefined();
+  });
+
   test("emits error event on HTTP 401 / 403 failure without hanging", async () => {
     const mockFetch = async () =>
       new Response(

@@ -1,13 +1,15 @@
 {
   "name": "pi-commandcode-go-provider",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Command Code Go ($1/mo plan) custom provider extension for Oh My Pi (OMP) and Pi coding agent",
   "type": "module",
   "main": "index.ts",
   "types": "index.ts",
   "scripts": {
     "test": "bun test tests/",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "catalog:generate": "bun run scripts/generate-catalog.ts",
+    "catalog:check": "bun run scripts/generate-catalog.ts --check"
   },
   "pi": {
     "extensions": [

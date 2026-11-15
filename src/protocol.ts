@@ -4,6 +4,30 @@ import { toWireModelId } from "./catalog.js";
 export const DEFAULT_GATEWAY_URL = "https://api.commandcode.ai/alpha/generate";
 export const CLI_VERSION = "0.26.20";
 export const DEFAULT_MAX_TOKENS = 64_000;
+/** Hard upstream ceiling: `/alpha/generate` rejects params.max_tokens above this. */
+export const MAX_OUTPUT_TOKENS = 200_000;
+
+/** Clamps a requested output budget into the gateway-accepted range. */
+export function clampMaxTokens(requested?: number): number {
+  const value =
+    typeof requested === "number" && Number.isFinite(requested)
+      ? Math.floor(requested)
+      : DEFAULT_MAX_TOKENS;
+  if (value < 1) return 1;
+  return Math.min(value, MAX_OUTPUT_TOKENS);
+}
+
+/**
+ * Reads the ceiling out of a gateway validation error such as
+ * `Too big: expected number to be <=200000 at "params.max_tokens"`.
+ */
+export function parseMaxTokensCap(detail: string): number | undefined {
+  if (!/max_tokens/i.test(detail)) return undefined;
+  const match = detail.match(/to be <=?\s*(\d+)/i) ?? detail.match(/maximum of\s*(\d+)/i);
+  if (!match) return undefined;
+  const cap = Number.parseInt(match[1], 10);
+  return Number.isFinite(cap) && cap > 0 ? cap : undefined;
+}
 
 export const GATEWAY_EFFORTS: Record<string, string> = {
   off: "off",
@@ -14,10 +38,6 @@ export const GATEWAY_EFFORTS: Record<string, string> = {
   max: "max",
 };
 
-const NULL_ARGUMENT_HINT =
-  "Leave this out by passing null unless you need a value other than the default.";
-
-
 /** Whether a schema node already accepts an explicit `null`. */
 function allowsNull(schema: unknown): boolean {
   if (!isRecord(schema)) return false;
@@ -26,44 +46,6 @@ function allowsNull(schema: unknown): boolean {
   if (schema.const === null) return true;
   if (Array.isArray(schema.enum) && schema.enum.includes(null)) return true;
   return Array.isArray(schema.anyOf) && schema.anyOf.some(allowsNull);
-}
-
-/** One optional property as the wire's nullable shape, hinting at the null. */
-function optionalAsNull(property: Record<string, unknown>): Record<string, unknown> {
-  const description =
-    typeof property.description === "string" && property.description.length > 0
-      ? `${property.description} ${NULL_ARGUMENT_HINT}`
-      : NULL_ARGUMENT_HINT;
-  return {
-    anyOf: [
-      { ...property, description },
-      { type: "null", description: "Use null when you do not need this argument." },
-    ],
-  };
-}
-
-/**
- * Transforms a tool's parameters schema so optional fields become nullable.
- * Required because Command Code's internal gateway proxies to strict OpenAI Responses.
- */
-export function clientSchema(parameters: unknown): unknown {
-  if (!isRecord(parameters)) return parameters;
-  const schema: Record<string, unknown> = { ...parameters };
-  if (isRecord(parameters.properties)) {
-    const required = new Set(Array.isArray(parameters.required) ? parameters.required : []);
-    const properties: Record<string, unknown> = {};
-    for (const [name, property] of Object.entries(parameters.properties)) {
-      const declared = clientSchema(property);
-      properties[name] =
-        !required.has(name) && isRecord(declared) && !allowsNull(declared)
-          ? optionalAsNull(declared)
-          : declared;
-    }
-    schema.properties = properties;
-  }
-  if (parameters.items !== undefined) schema.items = clientSchema(parameters.items);
-  if (Array.isArray(parameters.anyOf)) schema.anyOf = parameters.anyOf.map(clientSchema);
-  return schema;
 }
 
 /**
@@ -485,7 +467,7 @@ export function buildRequest(
       messages: wireMessages,
       tools: wireTools,
       system,
-      max_tokens: options?.maxTokens ?? DEFAULT_MAX_TOKENS,
+      max_tokens: clampMaxTokens(options?.maxTokens),
       stream: true,
       ...(options?.temperature !== undefined ? { temperature: options.temperature } : {}),
       ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),

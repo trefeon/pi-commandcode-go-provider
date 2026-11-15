@@ -1,37 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import {
   buildRequest,
-  clientSchema,
+  clampMaxTokens,
   dropNullArguments,
   gatewayErrorDetail,
+  MAX_OUTPUT_TOKENS,
   parseEventLine,
   parseEventStream,
+  parseMaxTokensCap,
   repairToolArguments,
 } from "../src/protocol.js";
 
 describe("protocol", () => {
-  describe("clientSchema and dropNullArguments", () => {
-    test("transforms optional properties into nullable schemas with description hint", () => {
-      const originalSchema = {
-        type: "object",
-        properties: {
-          path: { type: "string", description: "Path to file" },
-          offset: { type: "number", description: "Starting line" },
-        },
-        required: ["path"],
-      };
-
-      const transformed = clientSchema(originalSchema) as {
-        properties: {
-          path: { type: string };
-          offset: { anyOf: Array<{ type?: string }> };
-        };
-      };
-      expect(transformed.properties.path.type).toBe("string");
-      expect(transformed.properties.offset.anyOf).toBeDefined();
-      expect(transformed.properties.offset.anyOf[1].type).toBe("null");
-    });
-
+  describe("dropNullArguments and repairToolArguments", () => {
     test("dropNullArguments strips injected nulls for optional fields while keeping required/explicit ones", () => {
       const schema = {
         type: "object",
@@ -71,7 +52,7 @@ describe("protocol", () => {
   describe("buildRequest", () => {
     test("creates valid Command Code Go envelope", () => {
       const req = buildRequest(
-        "deepseek-v4-flash",
+        "deepseek-v4.1-flash",
         {
           systemPrompt: "You are an assistant.",
           messages: [
@@ -128,6 +109,32 @@ describe("protocol", () => {
       expect(req.params.messages[1].role).toBe("assistant");
       expect(req.params.messages[2].role).toBe("tool");
       expect(req.params.tools.length).toBe(1);
+    });
+
+    test("clamps oversized max_tokens to the gateway ceiling", () => {
+      expect(MAX_OUTPUT_TOKENS).toBe(200_000);
+      expect(clampMaxTokens(384_000)).toBe(200_000);
+      expect(clampMaxTokens(524_288)).toBe(200_000);
+      expect(clampMaxTokens(32_000)).toBe(32_000);
+      expect(clampMaxTokens(0)).toBe(1);
+      expect(clampMaxTokens()).toBe(64_000);
+
+      const req = buildRequest(
+        "deepseek/deepseek-v4.1-flash",
+        { messages: [{ role: "user", content: "Hi" }] },
+        { maxTokens: 500_000 }
+      ) as { params: { max_tokens: number } };
+      expect(req.params.max_tokens).toBe(200_000);
+    });
+
+    test("parses the max_tokens ceiling out of a gateway validation error", () => {
+      expect(
+        parseMaxTokensCap(
+          'Invalid request error. Validation error: Too big: expected number to be <=200000 at "params.max_tokens" [BAD_REQUEST]'
+        )
+      ).toBe(200_000);
+      expect(parseMaxTokensCap("something else entirely")).toBeUndefined();
+      expect(parseMaxTokensCap('Too big at "params.temperature"')).toBeUndefined();
     });
     test("serializes OMP toolResult messages properly as wire tool turns", () => {
       const req = buildRequest(
