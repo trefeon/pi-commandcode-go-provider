@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   buildRequest,
   clampMaxTokens,
+  coerceToolInput,
   dropNullArguments,
   gatewayErrorDetail,
   MAX_OUTPUT_TOKENS,
@@ -9,6 +10,7 @@ import {
   parseEventStream,
   parseMaxTokensCap,
   repairToolArguments,
+  resolveDeclaredToolName,
 } from "../src/protocol.js";
 
 describe("protocol", () => {
@@ -61,6 +63,84 @@ describe("protocol", () => {
       expect(bash.command).toBe("ls");
     });
 
+    test("repairToolArguments maps schema-known synonyms and wrappers", () => {
+      const readSchema = {
+        type: "object",
+        properties: { path: { type: "string" }, i: { type: "string" } },
+        required: ["path"],
+      };
+      expect(repairToolArguments({ file_path: "a.txt" }, "read", readSchema).path).toBe("a.txt");
+      expect(repairToolArguments({ arguments: { file_path: "a.txt" } }, "read", readSchema).path).toBe("a.txt");
+
+      const bashSchema = {
+        type: "object",
+        properties: { command: { type: "string" }, i: { type: "string" } },
+        required: ["command"],
+      };
+      expect(repairToolArguments({ cmd: "ls" }, "bash", bashSchema).command).toBe("ls");
+      // A numeric key that merely contains "command" must not become command.
+      expect(repairToolArguments({ command_timeout: 30 }, "bash", bashSchema).command).toBeUndefined();
+
+      const editSchema = {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          old_string: { type: "string" },
+          new_string: { type: "string" },
+        },
+        required: ["path", "old_string", "new_string"],
+      };
+      expect(
+        repairToolArguments({ file_path: "a.ts", old_str: "x", new_str: "y" }, "edit", editSchema)
+      ).toMatchObject({ path: "a.ts", old_string: "x", new_string: "y" });
+    });
+
+    test("repairToolArguments repairs fused keys for any declared property", () => {
+      const readSchema = {
+        type: "object",
+        properties: { path: { type: "string" }, i: { type: "string" } },
+        required: ["path"],
+      };
+      const repaired = repairToolArguments({ "i string Checking files Mevpath": "src/a.ts" }, "read", readSchema);
+      expect(repaired.path).toBe("src/a.ts");
+      expect(repaired.i).toContain("Checking files");
+    });
+
+    test("coerceToolInput extracts JSON from fences and prose", () => {
+      const bashSchema = {
+        type: "object",
+        properties: { command: { type: "string" }, i: { type: "string" } },
+        required: ["command"],
+      };
+      expect(coerceToolInput('```json\n{"command":"ls"}\n```', "bash", bashSchema).command).toBe("ls");
+      expect(coerceToolInput('Here you go: {"command":"pwd"}', "bash", bashSchema).command).toBe("pwd");
+    });
+
+    test("never fabricates a command from intent-only or broken JSON input", () => {
+      const bashSchema = {
+        type: "object",
+        properties: { command: { type: "string" }, i: { type: "string" } },
+        required: ["command"],
+      };
+      // Glyph-class models sometimes emit only the intent; that is not a command.
+      expect(repairToolArguments({ intent: "string" }, "bash", bashSchema).command).toBeUndefined();
+      expect(repairToolArguments({ i: "string" }, "bash", bashSchema).command).toBeUndefined();
+      // Malformed JSON text must be rejected, not executed as a shell command.
+      expect(coerceToolInput('{"Probing tool call!\\u00bf 0;probe-ok', "bash", bashSchema)).toEqual({});
+      // A legitimate brace-group command is still a bare string command.
+      expect(coerceToolInput("{ echo hi; }", "bash", bashSchema).command).toBe("{ echo hi; }");
+    });
+
+  });
+  describe("resolveDeclaredToolName", () => {
+    test("maps aliases and case variants only onto declared tools", () => {
+      expect(resolveDeclaredToolName("read_file", ["read", "bash"])).toBe("read");
+      expect(resolveDeclaredToolName("Bash", ["read", "bash"])).toBe("bash");
+      expect(resolveDeclaredToolName("str_replace_editor", ["edit"])).toBe("edit");
+      expect(resolveDeclaredToolName("run_command", ["bash"])).toBe("bash");
+      expect(resolveDeclaredToolName("read_file", ["read_file"])).toBe("read_file");
+      expect(resolveDeclaredToolName("read_file", ["write"])).toBe("read_file");
+    });
   });
   describe("buildRequest", () => {
     test("creates valid Command Code Go envelope", () => {
@@ -122,6 +202,33 @@ describe("protocol", () => {
       expect(req.params.messages[1].role).toBe("assistant");
       expect(req.params.messages[2].role).toBe("tool");
       expect(req.params.tools.length).toBe(1);
+    });
+
+    test("repairs replayed history tool-call arguments with the tool schema", () => {
+      const req = buildRequest("deepseek-v4.1-flash", {
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              { type: "toolCall", id: "call_hist", name: "read", arguments: { file_path: "a.txt" } },
+            ],
+          },
+          { role: "toolResult", toolCallId: "call_hist", toolName: "read", content: "hello" },
+        ],
+        tools: [
+          {
+            name: "read",
+            parameters: {
+              type: "object",
+              properties: { path: { type: "string" } },
+              required: ["path"],
+            },
+          },
+        ],
+      }) as { params: { messages: Array<{ role: string; content: Array<{ type: string; input?: { path?: string } }> }> } };
+
+      expect(req.params.messages[0].content[0].type).toBe("tool-call");
+      expect(req.params.messages[0].content[0].input?.path).toBe("a.txt");
     });
 
     test("clamps oversized max_tokens to the gateway ceiling", () => {

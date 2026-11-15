@@ -74,19 +74,113 @@ export function dropNullArguments(value: unknown, schema: unknown): unknown {
   }
   return dropped;
 }
+/** Extracts a JSON object from raw model text: fenced blocks, prose, or a partial delimiter. */
+function parseJsonObjectLoose(raw: string): Record<string, unknown> | undefined {
+  const direct = safeParseJson(raw);
+  if (isRecord(direct)) return direct;
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced) {
+    const parsed = safeParseJson(fenced[1].trim());
+    if (isRecord(parsed)) return parsed;
+  }
+  const start = raw.indexOf("{");
+  if (start < 0) return undefined;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < raw.length; index++) {
+    const char = raw[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === "{") depth++;
+    else if (char === "}" && --depth === 0) {
+      const parsed = safeParseJson(raw.slice(start, index + 1));
+      return isRecord(parsed) ? parsed : undefined;
+    }
+  }
+  return undefined;
+}
+
+/** Property names models use for an argument a host tool declares under another name. */
+const PROPERTY_SYNONYMS: Record<string, readonly string[]> = {
+  path: ["file_path", "filepath", "file", "filename", "target_file", "target_path", "uri", "location"],
+  command: ["cmd", "shell_command", "shell", "script", "bash_command", "exec"],
+  old_string: ["old_str", "old_text", "oldtext", "find", "original_text", "target_text"],
+  new_string: ["new_str", "new_text", "newtext", "replace", "replacement", "replacement_text", "updated_text"],
+  content: ["text", "data", "contents", "body", "file_content", "new_content"],
+  pattern: ["query", "regex", "search_pattern", "needle"],
+  code: ["source", "source_code"],
+};
+
+/** Keys that only describe intent and must never satisfy a required argument. */
+const INTENT_KEYS = new Set(["i", "intent", "description", "reason", "thought", "explanation", "summary", "note", "label"]);
+
+/** Tool names models emit for the primitive operations hosts declare. */
+const TOOL_NAME_ALIASES: Record<string, string> = {
+  read_file: "read",
+  readfile: "read",
+  file_read: "read",
+  open_file: "read",
+  view_file: "read",
+  write_file: "write",
+  writefile: "write",
+  file_write: "write",
+  create_file: "write",
+  edit_file: "edit",
+  replace_in_file: "edit",
+  str_replace: "edit",
+  str_replace_editor: "edit",
+  apply_patch: "edit",
+  run_command: "bash",
+  execute_command: "bash",
+  run_shell: "bash",
+  shell_command: "bash",
+  exec_command: "bash",
+  search_files: "grep",
+  ripgrep: "grep",
+  find_files: "glob",
+  list_files: "glob",
+};
+
+/** Case- and separator-insensitive form of a tool name. */
+export function normalizeToolName(name: string): string {
+  return name.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/** Resolves an upstream tool name to one the host actually declared. */
+export function resolveDeclaredToolName(rawName: string, declared: Iterable<string>): string {
+  const declaredSet = new Set(declared);
+  if (declaredSet.has(rawName)) return rawName;
+  const normalized = normalizeToolName(rawName);
+  for (const name of declaredSet) {
+    if (normalizeToolName(name) === normalized) return name;
+  }
+  const alias = TOOL_NAME_ALIASES[rawName.trim().toLowerCase()];
+  return alias && declaredSet.has(alias) ? alias : rawName;
+}
+
 /**
  * Repairs malformed or concatenated tool arguments produced by reasoning models.
- * Handles cases where models smash keys (e.g. "i string ... command": "ls") or wrap inputs.
+ * Handles smashed keys (e.g. "i string ... command": "ls"), wrapped inputs, and
+ * schema-known synonyms such as `file_path` for a declared `path`.
  */
-export function repairToolArguments(args: unknown, toolName?: string): JsonObject {
+export function repairToolArguments(args: unknown, toolName?: string, schema?: unknown): JsonObject {
   let record: Record<string, unknown>;
   if (typeof args === "string") {
-    try {
-      record = JSON.parse(args);
-    } catch {
-      if (toolName === "bash") {
-        return { command: args, i: "Running shell command" };
-      }
+    const parsed = parseJsonObjectLoose(args);
+    if (parsed) {
+      record = { ...parsed };
+    } else if (toolName === "bash" && args.trim().length > 0) {
+      return { command: args.trim(), i: "Running shell command" };
+    } else {
       return {};
     }
   } else if (isRecord(args)) {
@@ -95,14 +189,42 @@ export function repairToolArguments(args: unknown, toolName?: string): JsonObjec
     return {};
   }
 
+  const declaredProps =
+    isRecord(schema) && isRecord(schema.properties) ? Object.keys(schema.properties) : [];
+  const declaredSet = new Set(declaredProps);
+  const requiredProps =
+    isRecord(schema) && Array.isArray(schema.required)
+      ? schema.required.filter((prop): prop is string => typeof prop === "string")
+      : [];
+  const propSchema = (prop: string): Record<string, unknown> | undefined => {
+    const properties = isRecord(schema) && isRecord(schema.properties) ? schema.properties : undefined;
+    const node = properties?.[prop];
+    return isRecord(node) ? node : undefined;
+  };
+  const accepts = (value: unknown, prop: string): boolean => {
+    const type = propSchema(prop)?.type;
+    if (type === "string") return typeof value === "string";
+    if (type === "number" || type === "integer") return typeof value === "number";
+    if (type === "boolean") return typeof value === "boolean";
+    if (type === "array") return Array.isArray(value);
+    if (type === "object") return isRecord(value);
+    return true;
+  };
+
   // Models sometimes wrap the real arguments in an `original`/`input`/`parameters`
-  // field, either as an object or as a JSON string. Unwrap repeatedly (bounded)
-  // so `{original:{input:"{\"path\":...}"}}` still reaches the tool intact.
+  // (or similar) field, as an object or as JSON text. Unwrap repeatedly (bounded)
+  // unless the wrapper name is itself an argument the tool declares.
+  const wrapperKeys = ["original", "input", "parameters", "args", "arguments", "tool_input", "toolInput"];
   for (let depth = 0; depth < 4; depth++) {
     let unwrapped = false;
-    for (const key of ["original", "input", "parameters"] as const) {
+    for (const key of wrapperKeys) {
+      if (declaredSet.has(key)) continue;
       const wrapped = record[key];
-      const candidate = isRecord(wrapped) ? wrapped : typeof wrapped === "string" ? safeParseJson(wrapped) : undefined;
+      const candidate = isRecord(wrapped)
+        ? wrapped
+        : typeof wrapped === "string"
+          ? parseJsonObjectLoose(wrapped)
+          : undefined;
       if (!isRecord(candidate)) continue;
       record = { ...candidate };
       unwrapped = true;
@@ -112,59 +234,71 @@ export function repairToolArguments(args: unknown, toolName?: string): JsonObjec
   }
 
   const repaired: Record<string, unknown> = {};
+  const targetProps = declaredProps.length > 0 ? declaredProps : ["command", "path"];
 
+  // Fused keys: models concatenate the intent and the real key
+  // ("i string ... Mevcommand": "ls"). Prefer the longest property match and
+  // keep the free text as the `i` intent when the tool declares one.
   for (const [key, value] of Object.entries(record)) {
-    const lowerKey = key.toLowerCase();
-
-    // Detect smashed bash keys (e.g. "i string ... command", "...mevcommand")
-    if (lowerKey.includes("command") && !repaired.command) {
-      repaired.command = value;
-      if (
-        lowerKey.startsWith("i ") ||
-        lowerKey.startsWith("i\t") ||
-        lowerKey.startsWith("i string") ||
-        lowerKey.includes("listing") ||
-        lowerKey.includes("reading") ||
-        lowerKey.includes("checking")
-      ) {
+    if (declaredSet.has(key)) {
+      repaired[key] = value;
+      continue;
+    }
+    const normalizedKey = normalizeToolName(key);
+    let fusedProp: string | undefined;
+    for (const prop of targetProps) {
+      const normalizedProp = normalizeToolName(prop);
+      if (normalizedProp.length < 3 || !normalizedKey.endsWith(normalizedProp)) continue;
+      if (!fusedProp || normalizedProp.length > normalizeToolName(fusedProp).length) fusedProp = prop;
+    }
+    if (fusedProp && repaired[fusedProp] === undefined && accepts(value, fusedProp)) {
+      repaired[fusedProp] = value;
+      const looksFusedIntent =
+        /^i[\s\t]|^i\s*string/i.test(key) || /(listing|reading|checking|searching|running)/i.test(key);
+      if (looksFusedIntent && (declaredSet.size === 0 || declaredSet.has("i")) && !repaired.i) {
         const intent = key
           .replace(/^i\s+(?:string\s+)?/i, "")
-          .replace(/(?:mev)?command$/i, "")
           .replace(/[^\x20-\x7E]/g, " ")
+          .replace(new RegExp(`(?:mev)?${fusedProp.replace(/[^a-z0-9]/gi, "")}$`, "i"), "")
           .trim();
-        if (intent && !repaired.i) {
-          repaired.i = intent.slice(0, 150);
-        }
+        if (intent.length > 2) repaired.i = intent.slice(0, 150);
       }
       continue;
     }
-
-    // Detect smashed path keys (e.g. "i string ... path")
-    if (lowerKey.includes("path") && !repaired.path) {
-      repaired.path = value;
-      if (lowerKey.startsWith("i ") || lowerKey.startsWith("i\t") || lowerKey.startsWith("i string")) {
-        const intent = key
-          .replace(/^i\s+(?:string\s+)?/i, "")
-          .replace(/path$/i, "")
-          .replace(/[^\x20-\x7E]/g, " ")
-          .trim();
-        if (intent && !repaired.i) {
-          repaired.i = intent.slice(0, 150);
-        }
-      }
-      continue;
-    }
-
     repaired[key] = value;
   }
 
-  if (toolName === "bash") {
-    if (!repaired.command && typeof record === "string") {
-      repaired.command = record;
+  // Synonyms: `file_path` for a declared `path`, `cmd` for `command`, etc.
+  // Never steal a name the tool declares itself.
+  for (const prop of requiredProps) {
+    if (repaired[prop] !== undefined) continue;
+    for (const synonym of PROPERTY_SYNONYMS[prop] ?? []) {
+      if (declaredSet.has(synonym) || !(synonym in repaired) || !accepts(repaired[synonym], prop)) continue;
+      repaired[prop] = repaired[synonym];
+      delete repaired[synonym];
+      break;
     }
-    if (repaired.command && !repaired.i) {
-      repaired.i = "Running shell command";
+  }
+
+  // One stray string value for a tool that requires exactly one string argument.
+  if (requiredProps.length === 1 && repaired[requiredProps[0]] === undefined) {
+    const entries = Object.entries(repaired);
+    const only = entries[0];
+    if (
+      entries.length === 1 &&
+      only &&
+      !declaredSet.has(only[0]) &&
+      !INTENT_KEYS.has(only[0].toLowerCase()) &&
+      typeof only[1] === "string" &&
+      accepts(only[1], requiredProps[0])
+    ) {
+      repaired[requiredProps[0]] = only[1];
+      delete repaired[only[0]];
     }
+  }
+
+  if (toolName === "bash" && repaired.command && !repaired.i && (declaredSet.size === 0 || declaredSet.has("i"))) {
+    repaired.i = "Running shell command";
   }
 
   return repaired as JsonObject;
@@ -203,29 +337,31 @@ export function coerceToolInput(raw: unknown, toolName?: string, schema?: unknow
   if (isRecord(input)) {
     result = { ...input };
   } else if (typeof input === "string" && input.trim().length > 0) {
-    let text = input;
-    let needsWrap = true;
-    try {
-      const parsed: unknown = JSON.parse(input);
-      if (isRecord(parsed)) {
-        result = parsed;
-        needsWrap = false;
-      } else if (typeof parsed === "string") {
-        text = parsed;
-      } else {
-        needsWrap = false;
+    const loose = parseJsonObjectLoose(input);
+    if (loose) {
+      result = loose;
+    } else {
+      let text = input;
+      let needsWrap = true;
+      try {
+        const parsed: unknown = JSON.parse(input);
+        if (typeof parsed === "string") text = parsed;
+        else needsWrap = false;
+      } catch {
+        // not JSON
       }
-    } catch {
-      // not JSON
-    }
-
-    if (needsWrap && Object.keys(result).length === 0) {
-      const wrapped = wrapBareStringRoot(text, schema);
-      if (wrapped) result = wrapped;
+      // A string that opens like a JSON object but did not parse is malformed
+      // tool input, not a shell command; let the host reject it so the model
+      // retries instead of executing garbage.
+      const brokenJsonObject = /^\s*\{\s*"/.test(text);
+      if (needsWrap && !brokenJsonObject) {
+        const wrapped = wrapBareStringRoot(text, schema);
+        if (wrapped) result = wrapped;
+      }
     }
   }
 
-  return repairToolArguments(result, toolName);
+  return repairToolArguments(result, toolName, schema);
 }
 
 
@@ -271,7 +407,7 @@ function flattenText(content: unknown): string {
   return text;
 }
 
-function serializeAssistant(message: MessageLike): Record<string, unknown> {
+function serializeAssistant(message: MessageLike, toolSchemas?: Map<string, unknown>): Record<string, unknown> {
   const parts: unknown[] = [];
   const content = Array.isArray(message.content)
     ? message.content
@@ -300,7 +436,7 @@ function serializeAssistant(message: MessageLike): Record<string, unknown> {
         type: "tool-call",
         toolCallId: callId,
         toolName,
-        input: safeParseJson(b.arguments ?? fnArgs),
+        input: coerceToolInput(safeParseJson(b.arguments ?? fnArgs), toolName, toolSchemas?.get(toolName)),
       });
     }
   }
@@ -413,6 +549,8 @@ export function buildRequest(
   }
 
   // 3. Serialize messages
+  const toolSchemas = new Map<string, unknown>();
+  for (const tool of context.tools ?? []) toolSchemas.set(tool.name, tool.parameters);
   const wireMessages: Record<string, unknown>[] = [];
   for (const message of messages) {
     switch (message.role) {
@@ -423,7 +561,7 @@ export function buildRequest(
         break;
       }
       case "assistant": {
-        const turn = serializeAssistant(message);
+        const turn = serializeAssistant(message, toolSchemas);
         wireMessages.push(turn);
         // The gateway rejects the whole request with "Tool results are missing
         // for tool calls ..." when an assistant turn has a call without a

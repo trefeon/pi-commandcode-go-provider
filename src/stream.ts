@@ -10,6 +10,7 @@ import {
   gatewayErrorDetail,
   parseEventStream,
   parseMaxTokensCap,
+  resolveDeclaredToolName,
   sanitizeToolCallId,
 } from "./protocol.js";
 import type {
@@ -214,13 +215,18 @@ export function streamCommandCodeGo(
       let currentThinkingBlock: ThinkingContent | null = null;
       let currentThinkingIndex = -1;
       let hasToolCalls = false;
+      // The gateway streams tool input as start/delta/end and also emits a final
+      // `tool-call` with the parsed input. Keep the deltas so a final event that
+      // omits (or empties) `input` still yields the model's arguments.
+      const pendingToolInputs = new Map<string, string>();
+      const pendingToolNames = new Map<string, string>();
 
-      // Tools schema lookup for argument filtering
+      // Tools schema lookup for argument filtering and name resolution
       const toolSchemas = new Map<string, unknown>();
-      if (context.tools) {
-        for (const tool of context.tools) {
-          toolSchemas.set(tool.name, tool.parameters);
-        }
+      const declaredToolNames = new Set<string>();
+      for (const tool of context.tools ?? []) {
+        toolSchemas.set(tool.name, tool.parameters);
+        declaredToolNames.add(tool.name);
       }
 
       for await (const event of parseEventStream(response.body)) {
@@ -329,15 +335,45 @@ export function streamCommandCodeGo(
             break;
           }
 
+          case "tool-input-start": {
+            const id = String(event.id ?? event.toolCallId ?? "");
+            if (id) {
+              pendingToolInputs.set(id, "");
+              const name = event.toolName ?? event.name;
+              if (typeof name === "string" && name.length > 0) pendingToolNames.set(id, name);
+            }
+            break;
+          }
+
+          case "tool-input-delta": {
+            const id = String(event.id ?? event.toolCallId ?? "");
+            const delta = typeof event.delta === "string" ? event.delta : "";
+            if (id && delta.length > 0) {
+              pendingToolInputs.set(id, (pendingToolInputs.get(id) ?? "") + delta);
+            }
+            break;
+          }
+
+          case "tool-input-end":
+            break;
+
           case "tool-call": {
             hasToolCalls = true;
-            const callId = sanitizeToolCallId(
-              String(event.toolCallId ?? event.id ?? `call_${Date.now()}`)
+            const rawCallId = String(event.toolCallId ?? event.id ?? `call_${Date.now()}`);
+            const callId = sanitizeToolCallId(rawCallId);
+            const rawToolName = String(
+              event.toolName ?? event.name ?? pendingToolNames.get(rawCallId) ?? "unknown"
             );
-            const toolName = String(event.toolName ?? event.name ?? "unknown");
-            const rawArgs = event.input ?? event.args ?? event.arguments ?? {};
+            const toolName = resolveDeclaredToolName(rawToolName, declaredToolNames);
+            const assembled = pendingToolInputs.get(rawCallId);
+            let rawArgs = event.input ?? event.args ?? event.arguments;
+            if (assembled && (rawArgs === undefined || (isRecord(rawArgs) && Object.keys(rawArgs).length === 0))) {
+              rawArgs = assembled;
+            }
+            pendingToolInputs.delete(rawCallId);
+            pendingToolNames.delete(rawCallId);
             const schema = toolSchemas.get(toolName);
-            const filteredArgs = dropNullArguments(rawArgs, schema);
+            const filteredArgs = dropNullArguments(rawArgs ?? {}, schema);
             const coercedArgs = coerceToolInput(filteredArgs, toolName, schema);
 
             const toolCallBlock: ToolCallContent = {

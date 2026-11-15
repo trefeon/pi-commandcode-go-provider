@@ -176,6 +176,106 @@ describe("streamCommandCodeGo", () => {
     }
   });
 
+  test("resolves upstream tool aliases and repairs their arguments", async () => {
+    const mockBody = createMockStream([
+      JSON.stringify({
+        type: "tool-call",
+        toolCallId: "call_alias_1",
+        toolName: "read_file",
+        input: { file_path: "a.txt" },
+      }) + "\n",
+      '{"type":"finish","finishReason":"tool_calls"}\n',
+    ]);
+
+    const mockFetch = async () =>
+      new Response(mockBody, {
+        status: 200,
+        headers: { "content-type": "application/x-ndjson" },
+      });
+
+    const model = resolveModel("deepseek-v4-pro");
+    const stream = streamCommandCodeGo(
+      model,
+      {
+        messages: [{ role: "user", content: "Open a.txt" }],
+        tools: [
+          {
+            name: "read",
+            description: "Read a file",
+            parameters: {
+              type: "object",
+              properties: { path: { type: "string" }, i: { type: "string" } },
+              required: ["path"],
+            },
+          },
+        ],
+      },
+      { apiKey: "mock_key", fetch: mockFetch }
+    );
+
+    const events: AssistantMessageEvent[] = [];
+    for await (const event of stream) {
+      events.push(event);
+    }
+
+    const toolCallEvent = events.find((e) => e.type === "toolcall_end");
+    expect(toolCallEvent).toBeDefined();
+    if (toolCallEvent && toolCallEvent.type === "toolcall_end") {
+      expect(toolCallEvent.toolCall.name).toBe("read");
+      expect(toolCallEvent.toolCall.arguments.path).toBe("a.txt");
+    }
+  });
+
+  test("assembles arguments from tool-input deltas when the final event omits input", async () => {
+    const chunks = [
+      JSON.stringify({ type: "tool-input-start", id: "call_delta_1", toolName: "bash" }) + "\n",
+      JSON.stringify({ type: "tool-input-delta", id: "call_delta_1", delta: '{"' }) + "\n",
+      JSON.stringify({ type: "tool-input-delta", id: "call_delta_1", delta: 'command":"echo delta"}' }) + "\n",
+      JSON.stringify({ type: "tool-input-end", id: "call_delta_1" }) + "\n",
+      JSON.stringify({ type: "tool-call", toolCallId: "call_delta_1", toolName: "bash" }) + "\n",
+      '{"type":"finish","finishReason":"tool_calls"}\n',
+    ];
+    const mockBody = createMockStream(chunks);
+
+    const mockFetch = async () =>
+      new Response(mockBody, {
+        status: 200,
+        headers: { "content-type": "application/x-ndjson" },
+      });
+
+    const model = resolveModel("deepseek-v4-pro");
+    const stream = streamCommandCodeGo(
+      model,
+      {
+        messages: [{ role: "user", content: "Echo" }],
+        tools: [
+          {
+            name: "bash",
+            description: "Run shell command",
+            parameters: {
+              type: "object",
+              properties: { command: { type: "string" }, i: { type: "string" } },
+              required: ["command"],
+            },
+          },
+        ],
+      },
+      { apiKey: "mock_key", fetch: mockFetch }
+    );
+
+    const events: AssistantMessageEvent[] = [];
+    for await (const event of stream) {
+      events.push(event);
+    }
+
+    const toolCallEvent = events.find((e) => e.type === "toolcall_end");
+    expect(toolCallEvent).toBeDefined();
+    if (toolCallEvent && toolCallEvent.type === "toolcall_end") {
+      expect(toolCallEvent.toolCall.name).toBe("bash");
+      expect(toolCallEvent.toolCall.arguments.command).toBe("echo delta");
+    }
+  });
+
   test("retries once with the max_tokens ceiling named by a 400", async () => {
     const bodies: string[] = [];
     const okBody = createMockStream([
