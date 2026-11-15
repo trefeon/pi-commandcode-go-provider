@@ -19,27 +19,38 @@ This extension implements that wire protocol directly, allowing OMP and Pi to us
 
 ---
 
-## Installation & Setup
+## Quick Install (One-Liner)
 
-### In Oh My Pi (OMP)
+### Windows (PowerShell)
+```powershell
+irm https://raw.githubusercontent.com/trefeon/omp-command-code-go-provider/main/scripts/install.ps1 | iex
+```
 
-#### Option 1: Load via CLI flag
+### Linux / macOS / Git Bash
 ```bash
-omp -e D:/github_repo/omp-command-code-go-provider
+curl -fsSL https://raw.githubusercontent.com/trefeon/omp-command-code-go-provider/main/scripts/install.sh | bash
 ```
 
-#### Option 2: Add to OMP extensions folder
-Copy or symlink `index.ts` and `src/` to `~/.omp/agent/extensions/commandcode-go/`, or link the repository root in `~/.omp/agent/config.yml`:
-```yaml
-extensions:
-  - "D:/github_repo/omp-command-code-go-provider"
-```
-
-### In Pi
+### Manual Installation
+Clone the repository into your OMP extensions folder:
 ```bash
-pi -e D:/github_repo/omp-command-code-go-provider
+git clone https://github.com/trefeon/omp-command-code-go-provider.git ~/.omp/agent/extensions/omp-command-code-go-provider
+```
+Then create `~/.omp/agent/extensions/commandcode-go.ts`:
+```typescript
+import extension from "./omp-command-code-go-provider/index.ts";
+export default extension;
 ```
 
+---
+
+## Automated Model Sync & Self-Updates
+
+You never need to manually monitor upstream changes:
+1. **Runtime Background Auto-Sync:** On startup, the provider silently checks `https://api.commandcode.ai/provider/v1/models` in the background and caches newly released models automatically.
+2. **Instant In-Session Refresh:** Run `/commandcode-go-refresh` in OMP to force an immediate upstream model catalog check.
+3. **In-Session Git Self-Update:** Run `/commandcode-go-update` in OMP to pull the latest code updates directly from GitHub without leaving your terminal.
+4. **GitHub Actions Daily Sync:** A scheduled daily GitHub Action probes upstream Command Code catalogs and automatically commits new models and updated limits to this repository.
 ---
 
 ## Authentication

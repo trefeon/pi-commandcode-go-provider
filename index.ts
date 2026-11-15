@@ -5,8 +5,11 @@
  * enabling full access to all 30 CommandCode Go models without requiring the $15/mo Provider API.
  */
 
+import { execSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { hasApiKey, resolveApiKey } from "./src/auth.js";
 import { COMMAND_CODE_GO_MODELS, resolveModel } from "./src/catalog.js";
+import { loadCachedCatalog, refreshCatalog } from "./src/dynamic-catalog.js";
 import { fetchQuota } from "./src/quota.js";
 import { streamCommandCodeGo } from "./src/stream.js";
 import type {
@@ -40,7 +43,7 @@ function toProviderModelConfig(model: CommandCodeGoModel): ProviderModelConfig {
 }
 
 export function createProviderConfig(): ProviderConfig {
-  const models = COMMAND_CODE_GO_MODELS.map(toProviderModelConfig);
+  const initialModels = loadCachedCatalog().map(toProviderModelConfig);
   const apiKey = resolveApiKey();
 
   return {
@@ -51,11 +54,17 @@ export function createProviderConfig(): ProviderConfig {
     streamSimple: (model: CommandCodeGoModel, context: ContextLike, options?: StreamOptions) => {
       return streamCommandCodeGo(model, context, options);
     },
-    models,
+    models: initialModels,
     // OMP uses fetchDynamicModels (merged with static fallback)
-    fetchDynamicModels: async () => models,
+    fetchDynamicModels: async () => {
+      const res = await refreshCatalog();
+      return res.models.map(toProviderModelConfig);
+    },
     // Pi uses refreshModels (replaces catalog; must not return empty)
-    refreshModels: async () => models,
+    refreshModels: async () => {
+      const res = await refreshCatalog();
+      return res.models.map(toProviderModelConfig);
+    },
     oauth: {
       name: PROVIDER_NAME,
       login: async (callbacks) => {
@@ -152,6 +161,31 @@ export default async function (pi: ExtensionAPI): Promise<void> {
         ].filter(Boolean) as string[];
 
         ctx.ui?.notify(lines.join("\n"), "info");
+      },
+    });
+    pi.registerCommand("commandcode-go-refresh", {
+      description: "Auto-refresh model catalog from Command Code upstream",
+      handler: async (_args: string, ctx: ExtensionContext) => {
+        ctx.ui?.notify("Checking for new Command Code models upstream...", "info");
+        const { models, newCount } = await refreshCatalog();
+        const msg = newCount > 0
+          ? `Found ${newCount} new model(s)! Total catalog: ${models.length} models.`
+          : `Catalog is up to date (${models.length} models available).`;
+        ctx.ui?.notify(msg, "info");
+      },
+    });
+
+    pi.registerCommand("commandcode-go-update", {
+      description: "Pull latest plugin updates from git repository",
+      handler: async (_args: string, ctx: ExtensionContext) => {
+        try {
+          const moduleDir = fileURLToPath(new URL(".", import.meta.url));
+          ctx.ui?.notify("Pulling latest plugin updates from git...", "info");
+          const out = execSync("git pull --ff-only", { cwd: moduleDir, encoding: "utf-8" }).trim();
+          ctx.ui?.notify(`Plugin update: ${out}. Run /reload to apply.`, "info");
+        } catch (err) {
+          ctx.ui?.notify(`Update check failed: ${err instanceof Error ? err.message : String(err)}`, "warning");
+        }
       },
     });
   }

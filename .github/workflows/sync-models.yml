@@ -1,0 +1,39 @@
+name: Auto-Sync Upstream Models
+
+on:
+  schedule:
+    # Run daily at 04:00 UTC
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Run model sync
+        run: bun run scripts/sync-models.ts
+
+      - name: Commit and push changes if modified
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          if [[ -n $(git status -s) ]]; then
+            git add .
+            git commit -m "chore(models): auto-sync latest Command Code upstream models [skip ci]"
+            git push
+          else
+            echo "Catalog is already up to date."
+          fi
