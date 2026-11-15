@@ -193,14 +193,26 @@ function safeParseJson(raw: unknown): unknown {
 
 function flattenText(content: unknown): string {
   if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
+  if (!Array.isArray(content)) {
+    if (content && typeof content === "object") {
+      try {
+        return JSON.stringify(content);
+      } catch {
+        return String(content);
+      }
+    }
+    return "";
+  }
   let text = "";
   for (const part of content) {
     if (!part || typeof part !== "object") continue;
-    if (part.type === "text" && typeof part.text === "string") {
-      text += part.text;
-    } else if (part.text && typeof part.text === "string") {
-      text += part.text;
+    const p = part as Record<string, unknown>;
+    if (p.type === "text" && typeof p.text === "string") {
+      text += p.text;
+    } else if (typeof p.text === "string") {
+      text += p.text;
+    } else if (typeof p.content === "string") {
+      text += p.content;
     }
   }
   return text;
@@ -221,13 +233,21 @@ function serializeAssistant(message: MessageLike): Record<string, unknown> {
       parts.push({ type: "text", text: b.text });
     } else if ((b.type === "thinking" || b.type === "reasoning") && typeof (b.thinking ?? b.text) === "string") {
       parts.push({ type: "reasoning", text: b.thinking ?? b.text });
-    } else if (b.type === "toolCall" || b.type === "tool-call") {
-      const callId = sanitizeToolCallId(String(b.id ?? ""));
+    } else if (
+      b.type === "toolCall" ||
+      b.type === "tool-call" ||
+      b.type === "tool_call" ||
+      b.function
+    ) {
+      const callId = sanitizeToolCallId(String(b.id ?? b.call_id ?? b.toolCallId ?? ""));
+      const fnName = b.function && typeof b.function === "object" ? (b.function as Record<string, unknown>).name : undefined;
+      const toolName = String(b.name ?? fnName ?? "unknown");
+      const fnArgs = b.function && typeof b.function === "object" ? (b.function as Record<string, unknown>).arguments : undefined;
       parts.push({
         type: "tool-call",
         toolCallId: callId,
-        toolName: String(b.name ?? "unknown"),
-        input: safeParseJson(b.arguments),
+        toolName,
+        input: safeParseJson(b.arguments ?? fnArgs),
       });
     }
   }
@@ -269,11 +289,11 @@ function serializeTool(
   message: MessageLike,
   toolNames: Map<string, string>
 ): Record<string, unknown>[] {
-  const rawId = String(message.toolCallId ?? "");
+  const rec = message as unknown as Record<string, unknown>;
+  const rawId = String(message.toolCallId ?? rec.tool_call_id ?? rec.id ?? "");
   const toolCallId = sanitizeToolCallId(rawId);
   const text = flattenText(message.content);
-  const toolName = message.toolName ?? toolNames.get(toolCallId) ?? "unknown";
-
+  const toolName = message.toolName ?? (rec.toolName as string) ?? (rec.name as string) ?? toolNames.get(toolCallId) ?? "unknown";
   return [
     {
       role: "tool",
@@ -317,8 +337,16 @@ export function buildRequest(
       for (const block of message.content) {
         if (!block || typeof block !== "object") continue;
         const b = block as Record<string, unknown>;
-        if ((b.type === "toolCall" || b.type === "tool-call") && b.id && b.name) {
-          toolNames.set(sanitizeToolCallId(String(b.id)), String(b.name));
+        const isTc =
+          b.type === "toolCall" ||
+          b.type === "tool-call" ||
+          b.type === "tool_call" ||
+          Boolean(b.function);
+        const id = b.id ?? b.call_id ?? b.toolCallId;
+        const fnName = b.function && typeof b.function === "object" ? (b.function as Record<string, unknown>).name : undefined;
+        const name = b.name ?? fnName;
+        if (isTc && id && name) {
+          toolNames.set(sanitizeToolCallId(String(id)), String(name));
         }
       }
     }
@@ -338,17 +366,28 @@ export function buildRequest(
         wireMessages.push(serializeAssistant(message));
         break;
       case "tool":
+      case "toolResult":
+      case "tool_result": {
         for (const turn of serializeTool(message, toolNames)) {
           wireMessages.push(turn);
         }
         break;
-      default:
-        for (const turn of serializeUser(message)) {
-          wireMessages.push(turn);
+      }
+      default: {
+        const rec = message as unknown as Record<string, unknown>;
+        if (message.toolCallId || rec.tool_call_id || rec.toolCallId) {
+          for (const turn of serializeTool(message, toolNames)) {
+            wireMessages.push(turn);
+          }
+        } else {
+          for (const turn of serializeUser(message)) {
+            wireMessages.push(turn);
+          }
         }
+        break;
+      }
     }
   }
-
   // 4. Tools schema transformation
   const wireTools = (context.tools ?? []).map((tool: ToolLike) => ({
     name: tool.name,

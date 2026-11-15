@@ -129,6 +129,45 @@ describe("protocol", () => {
       expect(req.params.messages[2].role).toBe("tool");
       expect(req.params.tools.length).toBe(1);
     });
+    test("serializes OMP toolResult messages properly as wire tool turns", () => {
+      const req = buildRequest(
+        "deepseek-v4.1-flash",
+        {
+          messages: [
+            {
+              role: "assistant",
+              content: [
+                { type: "toolCall", id: "call_00_abc", name: "bash", arguments: { command: "ls" } },
+                { type: "toolCall", id: "call_01_def", name: "read", arguments: { path: "a.txt" } },
+              ],
+            },
+            {
+              role: "toolResult",
+              toolCallId: "call_00_abc",
+              content: "file1.txt",
+            },
+            {
+              role: "toolResult",
+              toolCallId: "call_01_def",
+              content: "content of a.txt",
+            },
+          ],
+        }
+      ) as { params: { messages: Array<{ role: string; content: unknown[] }> } };
+
+      expect(req.params.messages.length).toBe(3);
+      expect(req.params.messages[0].role).toBe("assistant");
+      expect(req.params.messages[1].role).toBe("tool");
+      expect(req.params.messages[2].role).toBe("tool");
+
+      const t1 = req.params.messages[1].content[0] as { type: string; toolCallId: string; toolName: string };
+      expect(t1.toolCallId).toBe("call_00_abc");
+      expect(t1.toolName).toBe("bash");
+
+      const t2 = req.params.messages[2].content[0] as { type: string; toolCallId: string; toolName: string };
+      expect(t2.toolCallId).toBe("call_01_def");
+      expect(t2.toolName).toBe("read");
+    });
   });
   describe("event parsing", () => {
     test("parseEventLine parses valid JSON lines", () => {
