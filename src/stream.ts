@@ -8,6 +8,7 @@ import {
   dropNullArguments,
   gatewayErrorDetail,
   parseEventStream,
+  repairToolArguments,
   sanitizeToolCallId,
 } from "./protocol.js";
 import type {
@@ -273,12 +274,13 @@ export function streamCommandCodeGo(
             const rawArgs = event.input ?? event.args ?? event.arguments ?? {};
             const schema = toolSchemas.get(toolName);
             const filteredArgs = (dropNullArguments(rawArgs, schema) ?? {}) as JsonObject;
+            const repairedArgs = repairToolArguments(filteredArgs, toolName);
 
             const toolCallBlock: ToolCallContent = {
               type: "toolCall",
               id: callId,
               name: toolName,
-              arguments: filteredArgs,
+              arguments: repairedArgs,
             };
 
             const callIndex = message.content.length;
@@ -288,7 +290,7 @@ export function streamCommandCodeGo(
             stream.push({
               type: "toolcall_delta",
               contentIndex: callIndex,
-              delta: JSON.stringify(filteredArgs),
+              delta: JSON.stringify(repairedArgs),
               partial: message,
             });
             stream.push({

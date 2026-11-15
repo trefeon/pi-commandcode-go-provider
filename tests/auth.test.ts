@@ -33,10 +33,20 @@ describe("auth", () => {
   });
 
   test("reads key from local command-code-go-api-keys fixture if present", () => {
-    const key = resolveApiKey();
-    // Since command-code-go-api-keys exists in workspace root, it should resolve a valid string
-    expect(typeof key).toBe("string");
-    expect(key!.length).toBeGreaterThan(10);
-    expect(hasApiKey()).toBe(true);
+    const fixturePath = "command-code-go-api-keys";
+    const alreadyExists = existsSync(fixturePath);
+    if (!alreadyExists) {
+      writeFileSync(fixturePath, "user_test_dummy_key_1234567890\n");
+    }
+    try {
+      const key = resolveApiKey();
+      expect(typeof key).toBe("string");
+      expect(key!.length).toBeGreaterThan(10);
+      expect(hasApiKey()).toBe(true);
+    } finally {
+      if (!alreadyExists && existsSync(fixturePath)) {
+        unlinkSync(fixturePath);
+      }
+    }
   });
 });

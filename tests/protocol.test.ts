@@ -6,6 +6,7 @@ import {
   gatewayErrorDetail,
   parseEventLine,
   parseEventStream,
+  repairToolArguments,
 } from "../src/protocol.js";
 
 describe("protocol", () => {
@@ -57,6 +58,15 @@ describe("protocol", () => {
       expect(cleaned.offset).toBeUndefined();
       expect(cleaned.filter).toBeNull();
     });
+    test("repairToolArguments fixes smashed bash keys from reasoning models", () => {
+      const malformed = {
+        "i string независимоListing root directory to understand project structure. Mevcommand": "ls",
+      };
+      const repaired = repairToolArguments(malformed, "bash");
+      expect(repaired.command).toBe("ls");
+      expect(repaired.i).toContain("Listing root directory to understand project structure");
+    });
+
   });
   describe("buildRequest", () => {
     test("creates valid Command Code Go envelope", () => {

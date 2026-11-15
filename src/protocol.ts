@@ -92,6 +92,90 @@ export function dropNullArguments(value: unknown, schema: unknown): unknown {
   }
   return dropped;
 }
+/**
+ * Repairs malformed or concatenated tool arguments produced by reasoning models.
+ * Handles cases where models smash keys (e.g. "i string ... command": "ls") or wrap inputs.
+ */
+export function repairToolArguments(args: unknown, toolName?: string): JsonObject {
+  let record: Record<string, unknown>;
+  if (typeof args === "string") {
+    try {
+      record = JSON.parse(args);
+    } catch {
+      if (toolName === "bash") {
+        return { command: args, i: "Running shell command" };
+      }
+      return {};
+    }
+  } else if (isRecord(args)) {
+    record = { ...args };
+  } else {
+    return {};
+  }
+
+  if (isRecord(record.original)) record = { ...record.original };
+  if (isRecord(record.input)) record = { ...record.input };
+  if (isRecord(record.parameters)) record = { ...record.parameters };
+
+  const repaired: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(record)) {
+    const lowerKey = key.toLowerCase();
+
+    // Detect smashed bash keys (e.g. "i string ... command", "...mevcommand")
+    if (lowerKey.includes("command") && !repaired.command) {
+      repaired.command = value;
+      if (
+        lowerKey.startsWith("i ") ||
+        lowerKey.startsWith("i\t") ||
+        lowerKey.startsWith("i string") ||
+        lowerKey.includes("listing") ||
+        lowerKey.includes("reading") ||
+        lowerKey.includes("checking")
+      ) {
+        const intent = key
+          .replace(/^i\s+(?:string\s+)?/i, "")
+          .replace(/(?:mev)?command$/i, "")
+          .replace(/[^\x20-\x7E]/g, " ")
+          .trim();
+        if (intent && !repaired.i) {
+          repaired.i = intent.slice(0, 150);
+        }
+      }
+      continue;
+    }
+
+    // Detect smashed path keys (e.g. "i string ... path")
+    if (lowerKey.includes("path") && !repaired.path) {
+      repaired.path = value;
+      if (lowerKey.startsWith("i ") || lowerKey.startsWith("i\t") || lowerKey.startsWith("i string")) {
+        const intent = key
+          .replace(/^i\s+(?:string\s+)?/i, "")
+          .replace(/path$/i, "")
+          .replace(/[^\x20-\x7E]/g, " ")
+          .trim();
+        if (intent && !repaired.i) {
+          repaired.i = intent.slice(0, 150);
+        }
+      }
+      continue;
+    }
+
+    repaired[key] = value;
+  }
+
+  if (toolName === "bash") {
+    if (!repaired.command && typeof record === "string") {
+      repaired.command = record;
+    }
+    if (repaired.command && !repaired.i) {
+      repaired.i = "Running shell command";
+    }
+  }
+
+  return repaired as JsonObject;
+}
+
 
 export function sanitizeToolCallId(id: string): string {
   const head = id.includes("|") ? id.split("|")[0] : id;
