@@ -57,13 +57,11 @@ export function createProviderConfig(): ProviderConfig {
     models: initialModels,
     // OMP uses fetchDynamicModels (merged with static fallback)
     fetchDynamicModels: async () => {
-      const res = await refreshCatalog();
-      return res.models.map(toProviderModelConfig);
+      return COMMAND_CODE_GO_MODELS.map(toProviderModelConfig);
     },
     // Pi uses refreshModels (replaces catalog; must not return empty)
     refreshModels: async () => {
-      const res = await refreshCatalog();
-      return res.models.map(toProviderModelConfig);
+      return COMMAND_CODE_GO_MODELS.map(toProviderModelConfig);
     },
     oauth: {
       name: PROVIDER_NAME,
@@ -88,10 +86,8 @@ export function createProviderConfig(): ProviderConfig {
 export default async function (pi: ExtensionAPI): Promise<void> {
   const config = createProviderConfig();
 
-  // Register as both 'commandcode-go' and 'commandcode' so users can use either:
-  // --model commandcode-go/<model> or the standard --model commandcode/<model>
+  // Register custom provider for Command Code Go
   pi.registerProvider(PROVIDER_ID, config);
-  pi.registerProvider("commandcode", config);
   // Status command: displays configuration and active key presence safely
   if (pi.registerCommand) {
     pi.registerCommand("commandcode-go-status", {

@@ -103,6 +103,7 @@ export type ThinkingLevelMap = Partial<Record<ThinkingLevel, string | null>>;
 
 export interface CommandCodeGoModel {
   id: string;
+  wireId?: string;
   name: string;
   contextWindow: number;
   maxTokens: number;

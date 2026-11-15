@@ -44,6 +44,14 @@ export function saveCachedCatalog(models: CommandCodeGoModel[]): void {
     // Ignore cache write errors
   }
 }
+function cleanModelId(rawId: string): string {
+  let id = rawId.trim();
+  if (id.includes("/")) {
+    id = id.split("/")[1];
+  }
+  return id.replace(/:free$/i, "-free").replace(/:/g, "-");
+}
+
 
 /**
  * Fetches the live public model listing from Command Code upstream
@@ -69,11 +77,13 @@ export async function refreshCatalog(): Promise<{
     }
 
     const currentModels = new Map<string, CommandCodeGoModel>();
+    const registered = new Set<string>();
     for (const m of COMMAND_CODE_GO_MODELS) {
       currentModels.set(m.id, m);
-    }
-    for (const m of loadCachedCatalog()) {
-      currentModels.set(m.id, m);
+      registered.add(m.id.toLowerCase());
+      if (m.wireId) registered.add(m.wireId.toLowerCase());
+      const bare = m.id.includes("/") ? m.id.split("/")[1] : m.id;
+      registered.add(bare.toLowerCase());
     }
 
     let newCount = 0;
@@ -81,28 +91,36 @@ export async function refreshCatalog(): Promise<{
       if (!isRecord(raw) || typeof raw.id !== "string") continue;
       const id = raw.id.trim();
       if (!id) continue;
+      const rawWireId = id;
+      const cleanId = cleanModelId(id);
+      const lowerClean = cleanId.toLowerCase();
 
-      if (!currentModels.has(id)) {
-        const contextWindow =
-          typeof raw.context_length === "number"
-            ? raw.context_length
-            : typeof raw.context_window === "number"
-              ? raw.context_window
-              : 1_000_000;
-
-        const dynamicModel: CommandCodeGoModel = {
-          id,
-          name: typeof raw.name === "string" ? raw.name : `${id} (Go)`,
-          contextWindow,
-          maxTokens: 64_000,
-          reasoning: true,
-          input: ["text", "image"],
-          toolCall: true,
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        };
-        currentModels.set(id, dynamicModel);
-        newCount++;
+      if (registered.has(lowerClean) || currentModels.has(cleanId)) {
+        continue;
       }
+      registered.add(lowerClean);
+      registered.add(rawWireId.toLowerCase());
+
+      const contextWindow =
+        typeof raw.context_length === "number"
+          ? raw.context_length
+          : typeof raw.context_window === "number"
+            ? raw.context_window
+            : 1_000_000;
+
+      const dynamicModel: CommandCodeGoModel = {
+        id: cleanId,
+        wireId: rawWireId,
+        name: typeof raw.name === "string" ? raw.name : `${cleanId} (Go)`,
+        contextWindow,
+        maxTokens: 64_000,
+        reasoning: true,
+        input: ["text", "image"],
+        toolCall: true,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      };
+      currentModels.set(cleanId, dynamicModel);
+      newCount++;
     }
 
     const merged = Array.from(currentModels.values());
