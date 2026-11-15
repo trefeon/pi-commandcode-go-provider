@@ -11,7 +11,8 @@ import { hasApiKey, resolveApiKey } from "./src/auth.js";
 import { COMMAND_CODE_GO_MODELS, registerCatalogModels } from "./src/catalog.js";
 import { loadCachedCatalog, refreshCatalog } from "./src/dynamic-catalog.js";
 import { clampMaxTokens } from "./src/protocol.js";
-import { fetchQuota } from "./src/quota.js";
+import { fetchUsageOverview } from "./src/quota.js";
+import { COMMANDCODE_BUILTIN_ID, commandCodeUsageProvider, COMMANDCODE_GO_ID } from "./src/usage.js";
 import { streamCommandCodeGo } from "./src/stream.js";
 import type {
   CommandCodeGoModel,
@@ -27,6 +28,25 @@ export const PROVIDER_ID = "commandcode-go";
 export const PROVIDER_NAME = "Command Code Go";
 export const PROVIDER_API = "commandcode-go";
 export const GATEWAY_BASE_URL = "https://api.commandcode.ai/alpha/generate";
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
+function formatCountdown(iso: string): string {
+  const ms = new Date(iso).getTime() - Date.now();
+  if (!Number.isFinite(ms)) return iso;
+  if (ms <= 0) return "now";
+  const minutes = Math.round(ms / 60_000);
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
+  const mins = minutes % 60;
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${mins}m`;
+  return `${mins}m`;
+}
 
 function toProviderModelConfig(model: CommandCodeGoModel): ProviderModelConfig {
   return {
@@ -53,6 +73,7 @@ export function createProviderConfig(): ProviderConfig {
     baseUrl: GATEWAY_BASE_URL,
     apiKey: apiKey ?? "COMMANDCODE_API_KEY",
     api: PROVIDER_API,
+    usage: commandCodeUsageProvider(COMMANDCODE_GO_ID),
     streamSimple: (model: CommandCodeGoModel, context: ContextLike, options?: StreamOptions) => {
       return streamCommandCodeGo(model, context, options);
     },
@@ -92,6 +113,13 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 
   // Register custom provider for Command Code Go
   pi.registerProvider(PROVIDER_ID, config);
+
+  // Override the built-in `commandcode` usage fetcher so omp's native `/usage`
+  // dashboard renders the monthly limit (built-in only shows 5h/weekly/balance).
+  // Models for that id stay hidden via `disabledProviders`; only usage is overridden.
+  pi.registerProvider(COMMANDCODE_BUILTIN_ID, {
+    usage: commandCodeUsageProvider(COMMANDCODE_BUILTIN_ID),
+  });
   // Status command: displays configuration and active key presence safely
   if (pi.registerCommand) {
     pi.registerCommand("commandcode-go-status", {
@@ -135,29 +163,69 @@ export default async function (pi: ExtensionAPI): Promise<void> {
     });
 
     pi.registerCommand("commandcode-go-quota", {
-      description: "Check Command Code account quota and subscription status",
+      description:
+        "Show Command Code usage overview: token/run totals, credit balance, and 5h/weekly/monthly limits",
       handler: async (_args: string, ctx: ExtensionContext) => {
         if (!hasApiKey()) {
           ctx.ui?.notify("No Command Code API key configured.", "warning");
           return;
         }
 
-        ctx.ui?.notify("Fetching Command Code account quota...", "info");
-        const quota = await fetchQuota();
-        if (!quota) {
-          ctx.ui?.notify("Unable to retrieve quota information from Command Code.", "warning");
+        ctx.ui?.notify("Fetching Command Code usage overview...", "info");
+        const overview = await fetchUsageOverview();
+        if (!overview) {
+          ctx.ui?.notify("Unable to retrieve usage information from Command Code.", "warning");
           return;
         }
 
+        const { summary, quota, monthlyGrant } = overview;
+        const monthDay = (iso: string) =>
+          new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+
+        let monthlyReset: string | undefined;
+        if (summary.periodStart) {
+          const d = new Date(summary.periodStart);
+          if (!Number.isNaN(d.getTime())) {
+            d.setMonth(d.getMonth() + 1);
+            monthlyReset = monthDay(d.toISOString());
+          }
+        }
+
+        const pct = (used: number, cap: number) => (cap > 0 ? `${Math.round((used / cap) * 100)}%` : "0%");
+        const usd = (n: number) => `$${n.toFixed(2)}`;
+
         const lines = [
-          "Command Code Account Quota:",
-          quota.plan ? `Plan: ${quota.plan}` : undefined,
-          quota.fiveHourWindow
-            ? `5h Window: ${quota.fiveHourWindow.used} / ${quota.fiveHourWindow.cap} used`
+          "Command Code Usage Overview:",
+          summary.periodStart ? `Billing period: since ${monthDay(summary.periodStart)}` : undefined,
+          `Total tokens: ${formatTokens(summary.totalTokens)} (in ${formatTokens(summary.totalTokensIn)} / out ${formatTokens(summary.totalTokensOut)})`,
+          `Total runs: ${summary.totalRuns.toLocaleString()}${
+            summary.successRate !== undefined ? ` (${Math.round(summary.successRate)}% success)` : ""
+          }${summary.failedRuns > 0 ? `, ${summary.failedRuns} failed` : ""}`,
+          quota?.creditsRemaining !== undefined
+            ? monthlyGrant !== undefined
+              ? `Credit balance: ${usd(quota.creditsRemaining)} of ${usd(monthlyGrant)} monthly credits remaining`
+              : `Credit balance: ${usd(quota.creditsRemaining)} monthly credits remaining`
             : undefined,
-          quota.weeklyWindow
-            ? `Weekly Window: ${quota.weeklyWindow.used} / ${quota.weeklyWindow.cap} used`
+          quota?.purchasedCredits !== undefined ? `Purchased credits: ${usd(quota.purchasedCredits)}` : undefined,
+          quota?.freeCredits !== undefined ? `Free credits: ${usd(quota.freeCredits)}` : undefined,
+          quota?.fiveHourWindow
+            ? `5-Hour Limit: ${pct(quota.fiveHourWindow.used, quota.fiveHourWindow.cap)} (${usd(quota.fiveHourWindow.used)} of ${usd(quota.fiveHourWindow.cap)})${
+                quota.fiveHourWindow.resetAt ? ` — resets in ${formatCountdown(quota.fiveHourWindow.resetAt)}` : ""
+              }`
             : undefined,
+          quota?.weeklyWindow
+            ? `Weekly Limit: ${pct(quota.weeklyWindow.used, quota.weeklyWindow.cap)} (${usd(quota.weeklyWindow.used)} of ${usd(quota.weeklyWindow.cap)})${
+                quota.weeklyWindow.resetAt ? ` — resets in ${formatCountdown(quota.weeklyWindow.resetAt)}` : ""
+              }`
+            : undefined,
+          monthlyGrant !== undefined
+            ? `Monthly Limit: ${pct(summary.totalMonthlyCredits, monthlyGrant)} (${usd(summary.totalMonthlyCredits)} of ${usd(monthlyGrant)})${
+                monthlyReset ? ` — resets on ${monthlyReset}` : ""
+              }`
+            : summary.totalMonthlyCredits !== undefined
+              ? `Monthly spend: ${usd(summary.totalMonthlyCredits)}`
+              : undefined,
+          quota?.belowThreshold ? "Warning: credit balance below threshold." : undefined,
         ].filter(Boolean) as string[];
 
         ctx.ui?.notify(lines.join("\n"), "info");

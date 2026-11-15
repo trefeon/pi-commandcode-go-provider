@@ -173,16 +173,24 @@ export interface ProviderModelConfig {
 }
 
 export interface ProviderConfig {
-  name: string;
-  baseUrl: string;
+  /** Minimal structural mirror of @oh-my-pi/pi-ai's UsageProvider (no host import). */
+  usage?: {
+    id: string;
+    cacheVersion?: number;
+    fetchUsage(params: unknown, ctx: unknown): Promise<unknown>;
+    supports?(params: unknown): boolean;
+    validatesCredentials?: boolean;
+  };
+  name?: string;
+  baseUrl?: string;
   apiKey?: string;
-  api: string;
-  streamSimple: (
+  api?: string;
+  streamSimple?: (
     model: CommandCodeGoModel,
     context: ContextLike,
     options?: StreamOptions
   ) => AssistantMessageEventStreamLike;
-  models: ProviderModelConfig[];
+  models?: ProviderModelConfig[];
   headers?: Record<string, string>;
   fetchDynamicModels?: () => Promise<ProviderModelConfig[]>;
   refreshModels?: () => Promise<ProviderModelConfig[]>;

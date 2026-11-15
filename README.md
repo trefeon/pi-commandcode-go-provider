@@ -87,7 +87,11 @@ omp --model commandcode-go/kimi-k2.7-code
 Inside OMP / Pi interactive session:
 - `/commandcode-go-status` — Displays gateway URL, API key status, model count, and active model.
 - `/commandcode-go-models` — Lists every Go-plan model with context, output cap, and reasoning efforts.
-- `/commandcode-go-quota` — Checks rolling 5-hour and weekly usage windows.
+- `/commandcode-go-quota` — Studio-style usage overview: billing-period token/run totals, credit balance (monthly/purchased/free), and 5-hour/weekly/monthly limit percentages with reset times.
+
+### Native `/usage` Dashboard
+
+The extension overrides omp's built-in `commandcode` usage fetcher, so the native `/usage` dashboard (TUI overlay and `omp usage`) renders the full per-account limit set for Command Code: 5-hour, weekly, **monthly** (spend vs. the $10.00 credit grant, reset = billing-period start + 1 month), and credit balance. The built-in fetcher only reports 5h/weekly/balance — it never calls `/alpha/usage/summary`, so the monthly row was missing. Model registration for the built-in id stays disabled via `disabledProviders`; only the usage section is overridden (`cacheVersion: 2` keeps the two report caches separate).
 
 ---
 
