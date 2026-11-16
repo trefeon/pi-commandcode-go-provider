@@ -94,7 +94,7 @@ export interface UsageProvider {
 
 const DEFAULT_ORIGIN = "https://api.commandcode.ai";
 /** Bumped past the built-in fetcher (no cacheVersion) so cached built-in reports never cross over. */
-const CACHE_VERSION = 2;
+const CACHE_VERSION = 3;
 
 function finiteNumber(value: unknown): number | undefined {
 	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
@@ -293,12 +293,6 @@ async function fetchCommandCodeUsage(
 	}
 	const monthlyLimit = buildMonthlyLimit(summary, creditsRemaining, providerId, userId, orgId);
 	if (monthlyLimit) limits.push(monthlyLimit);
-	limits.push({
-		id: `${providerId}:balance`,
-		label: "Credit balance",
-		scope: { provider: providerId, accountId: userId, ...(orgId ? { orgId } : {}), windowId: "balance", shared: true },
-		amount: { remaining: creditsRemaining + (purchased ?? 0) + (free ?? 0), unit: "credits" },
-	});
 
 	return {
 		provider: providerId,

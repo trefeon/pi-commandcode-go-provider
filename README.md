@@ -91,7 +91,7 @@ Inside OMP / Pi interactive session:
 
 ### Native `/usage` Dashboard
 
-The extension overrides omp's built-in `commandcode` usage fetcher, so the native `/usage` dashboard (TUI overlay and `omp usage`) renders the full per-account limit set for Command Code: 5-hour, weekly, **monthly** (spend vs. the $10.00 credit grant, reset = billing-period start + 1 month), and credit balance. The built-in fetcher only reports 5h/weekly/balance — it never calls `/alpha/usage/summary`, so the monthly row was missing. Model registration for the built-in id stays disabled via `disabledProviders`; only the usage section is overridden (`cacheVersion: 2` keeps the two report caches separate).
+The extension overrides omp's built-in `commandcode` usage fetcher, so the native `/usage` dashboard (TUI overlay and `omp usage`) renders the full per-account limit set for Command Code: 5-hour, weekly, and **monthly** (spend vs. the $10.00 credit grant, reset = billing-period start + 1 month). The built-in fetcher never calls `/alpha/usage/summary`, so the monthly row was missing. Model registration for the built-in id stays disabled via `disabledProviders`; only the usage section is overridden (`cacheVersion: 3` keeps the two report caches separate).
 
 ---
 

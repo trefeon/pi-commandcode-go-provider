@@ -66,7 +66,7 @@ async function run(routes: Record<string, unknown>, status = 200, failing: reado
 }
 
 describe("commandCodeUsageProvider", () => {
-  test("reports 5h, weekly, monthly, and balance limits", async () => {
+  test("reports 5h, weekly, and monthly limits", async () => {
     const report = await run({ whoami: WHOAMI, "billing/credits": CREDITS, "usage/summary": SUMMARY });
     expect(report).not.toBeNull();
     expect(report!.provider).toBe("commandcode");
@@ -74,7 +74,6 @@ describe("commandCodeUsageProvider", () => {
       "commandcode:5h",
       "commandcode:7d",
       "commandcode:monthly",
-      "commandcode:balance",
     ]);
 
     const fiveHour = report!.limits[0];
@@ -88,9 +87,7 @@ describe("commandCodeUsageProvider", () => {
     expect(monthly.amount.usedFraction).toBeCloseTo(5.0730927678 / 10.0, 12);
     expect(monthly.window!.resetsAt).toBe(new Date("2026-12-15T11:41:09.000Z").getTime());
     expect(monthly.status).toBe("ok");
-
-    const balance = report!.limits[3];
-    expect(balance.amount.remaining).toBeCloseTo(4.9269072322, 12);
+    expect(report!.limits).toHaveLength(3);
     expect(report!.metadata!.email).toBe("trefeon@gmail.com");
   });
 
@@ -101,7 +98,7 @@ describe("commandCodeUsageProvider", () => {
       ["usage/summary"],
     );
     expect(report).not.toBeNull();
-    expect(report!.limits.map((limit) => limit.id)).toEqual(["commandcode:5h", "commandcode:7d", "commandcode:balance"]);
+    expect(report!.limits.map((limit) => limit.id)).toEqual(["commandcode:5h", "commandcode:7d"]);
   });
 
   test("returns null when whoami or credits fail", async () => {
