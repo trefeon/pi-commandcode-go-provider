@@ -55,7 +55,7 @@ describe("catalog", () => {
   });
 
   test("preferredCompactionModelId picks cheapest tier-aware paid 1M+ model", () => {
-    expect(preferredCompactionModelId()).toBe("muse-spark-1.2-contributor");
+    expect(preferredCompactionModelId()).toBe("hy4-flash");
     const picked = COMMAND_CODE_GO_MODELS.find((m) => m.id === preferredCompactionModelId())!;
     expect(picked.contextWindow).toBeGreaterThanOrEqual(1_000_000);
     expect(picked.id.endsWith("-free")).toBe(false);

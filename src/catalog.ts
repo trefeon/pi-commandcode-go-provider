@@ -106,7 +106,7 @@ export function resolveModel(id: string): CommandCodeGoModel {
     maxTokens: 200_000,
     reasoning: true,
     efforts: STANDARD_EFFORTS,
-    thinking: { mode: "effort", efforts: STANDARD_EFFORTS, defaultLevel: "medium" },
+    thinking: { mode: "effort", efforts: STANDARD_EFFORTS },
     thinkingLevelMap: DEFAULT_THINKING_LEVEL_MAP,
     input: ["text", "image"],
     toolCall: true,

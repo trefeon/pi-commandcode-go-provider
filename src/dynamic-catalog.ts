@@ -12,7 +12,7 @@ const TIMEOUT_MS = 20_000;
 /** Catalog tier whose rows the $1/mo Go plan may actually run. */
 const GO_PLAN = "individual-go";
 /** Cache layout marker: older versions held stale plan/metadata rows, so they are discarded. */
-const CACHE_VERSION = 3;
+const CACHE_VERSION = 4;
 
 const KNOWN_EFFORTS: readonly string[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
@@ -127,9 +127,6 @@ function toDynamicModel(raw: RawCatalogModel): CommandCodeGoModel | undefined {
     typeof raw.context_length === "number" && raw.context_length > 0 ? raw.context_length : 1_000_000;
   const declaredMax =
     typeof raw.maxOutputTokens === "number" ? raw.maxOutputTokens : MAX_OUTPUT_TOKENS;
-  const defaultLevel = efforts.includes("high")
-    ? "high"
-    : (efforts.find((level) => level !== "off") ?? undefined);
   const modalities = Array.isArray(raw.inputModalities)
     ? raw.inputModalities.filter((m) => m === "text" || m === "image")
     : [];
@@ -142,7 +139,7 @@ function toDynamicModel(raw: RawCatalogModel): CommandCodeGoModel | undefined {
     maxTokens: clampMaxTokens(declaredMax),
     reasoning: true,
     ...(efforts.length > 0
-      ? { efforts, thinking: { mode: "effort" as const, efforts, defaultLevel } }
+      ? { efforts, thinking: { mode: "effort" as const, efforts } }
       : {}),
     input: modalities.length > 0 ? modalities : ["text"],
     toolCall: true,

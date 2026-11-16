@@ -15,7 +15,7 @@ Command Code Go instead communicates via Command Code's internal CLI gateway:
 - **Protocol:** Line-delimited JSON (NDJSON) streaming
 - **Headers:** `x-command-code-version: 0.26.20`, `x-cli-environment: production`, `user-agent: cli`
 
-This extension implements that wire protocol directly, allowing OMP and Pi to use the full Go-plan model catalog (58 models at the time of writing) with full tool calling, reasoning/thinking, and streaming support.
+This extension implements that wire protocol directly, allowing OMP and Pi to use the full Go-plan model catalog (60 models at the time of writing) with full tool calling, reasoning/thinking, and streaming support.
 
 ---
 
@@ -97,7 +97,7 @@ The extension overrides omp's built-in `commandcode` usage fetcher, so the nativ
 
 ## Supported Models
 
-The catalog is generated from upstream and contains every Go-plan model (58 rows today). Flagship entries:
+The catalog is generated from upstream and contains every Go-plan model (60 rows today). Flagship entries:
 
 | ID | Name | Context | Max Output | Reasoning Efforts | Modalities |
 |---|---|---|---|---|---|
@@ -118,6 +118,8 @@ The catalog is generated from upstream and contains every Go-plan model (58 rows
 
 Models above the Go plan (Claude, GPT-5.x Pro/Max, Gemini, etc.) are filtered out of the catalog, so the picker only shows runnable models.
 
+Model rows declare their effort ladders but no default level: a new session's starting effort comes from your selector suffix (e.g. `commandcode-go/deepseek-v4.1-flash:max` in `modelRoles`) or the host `defaultThinkingLevel`, not from a level baked into the plugin.
+
 ---
 
 ## Protocol Compatibility (OMP & Pi)
@@ -129,7 +131,7 @@ Models above the Go plan (Claude, GPT-5.x Pro/Max, Gemini, etc.) are filtered ou
 - **Stream parsing:** text and reasoning deltas, `tool-call` frames, usage totals, finish reasons, and mid-stream error events.
 - **Usage accounting:** upstream `inputTokens` is the whole prompt, cache hits included (`noCacheTokens + cacheReadTokens + cacheWriteTokens`). `usage.input` carries only the uncached remainder and `usage.contextTokens` the full prompt, matching the host convention (`input + cacheRead + cacheWrite`). Without this split every cache hit is counted twice and the context gauge doubles — a 570K-token prompt renders at ~105% of a 1M window.
 - **Output budget:** `max_tokens` uses each model's upstream declared cap, or the full gateway ceiling (200,000) when upstream declares none. The gateway hard-rejects anything above 200,000 — verified against models that declare 256K/262K — so 200K is the highest the endpoint accepts. If upstream ever reports a lower cap in a 400, the request retries once with that value.
-- **Compaction:** every registered model carries `compactionModel: commandcode-go/muse-spark-1.2-contributor` — picked from the upstream price list at the compaction workload (500K in / 8K out): 1M+ window required (the target must read the oversized context), free/stealth-preview rows excluded (capacity-gated, refuse under load — the failure that motivated this), then cheapest tier-aware cost using the upstream `contextTiers` the catalog now carries. Flat base rates mislead: `gpt-6-luna` is 0.10/M base but 0.20/M above 272K, and `qwen3.7-flash`'s 0.03 is its ≤32K tier (0.20/M above 256K) — both lose to muse-spark-1.2-contributor's flat 0.10/0.20. The compaction reference resolves before the session model; a withdrawn upstream id degrades gracefully back to it.
+- **Compaction:** every registered model carries `compactionModel: commandcode-go/hy4-flash` — picked from the upstream price list at the compaction workload (500K in / 8K out): 1M+ window required (the target must read the oversized context), free/stealth-preview rows excluded (capacity-gated, refuse under load — the failure that motivated this), then cheapest tier-aware cost using the upstream `contextTiers` the catalog now carries. Flat base rates mislead: `gpt-6-luna` is 0.10/M base but 0.20/M above 272K, and `qwen3.7-flash`'s 0.03 is its ≤32K tier (0.20/M above 256K) — both lose to `hy4-flash`'s flat 0.07/0.281. The compaction reference resolves before the session model; a withdrawn upstream id degrades gracefully back to it.
 
 ---
 

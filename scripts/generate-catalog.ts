@@ -42,7 +42,7 @@ interface GeneratedModel {
   maxTokens: number;
   reasoning: true;
   efforts?: string[];
-  thinking?: { mode: "effort"; efforts: string[]; defaultLevel?: string };
+  thinking?: { mode: "effort"; efforts: string[] };
   input: string[];
   toolCall: true;
   cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
@@ -104,7 +104,6 @@ function toModel(raw: RawModel): GeneratedModel | undefined {
     ? raw.inputModalities.filter((m): m is string => m === "text" || m === "image")
     : [];
   const declaredMax = numberOr(raw.maxOutputTokens, MAX_OUTPUT_TOKENS);
-  const defaultLevel = efforts.includes("high") ? "high" : efforts.find((level) => level !== "off");
   const label =
     typeof raw.display?.label === "string"
       ? raw.display.label
@@ -120,7 +119,7 @@ function toModel(raw: RawModel): GeneratedModel | undefined {
     maxTokens: clampMaxTokens(declaredMax),
     reasoning: true,
     ...(efforts.length > 0
-      ? { efforts, thinking: { mode: "effort" as const, efforts, defaultLevel } }
+      ? { efforts, thinking: { mode: "effort" as const, efforts } }
       : {}),
     input: modalities.length > 0 ? modalities : ["text"],
     toolCall: true,
