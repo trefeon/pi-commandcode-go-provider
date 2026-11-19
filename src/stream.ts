@@ -145,9 +145,18 @@ export function streamCommandCodeGo(
 
     const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const controller = new AbortController();
-    const timeoutTimer = setTimeout(() => {
-      controller.abort(new Error(`Command Code Go request timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
+    // timeoutMs is the host's httpIdleTimeoutMs (Pi default 300s): it bounds the
+    // gap between chunks, not total generation time. Re-arm on every raw chunk
+    // so long, steadily-streaming reasoning turns are not cut off at timeoutMs.
+    // Upstream reference: patlux/pi-commandcode-provider#87 → PR #88 (merged).
+    let timeoutTimer: NodeJS.Timeout | undefined;
+    const armTimeout = () => {
+      clearTimeout(timeoutTimer);
+      timeoutTimer = setTimeout(() => {
+        controller.abort(new Error(`Command Code Go request timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+    };
+    armTimeout();
 
     const signal = options?.signal
       ? AbortSignal.any([options.signal, controller.signal])
@@ -252,7 +261,17 @@ export function streamCommandCodeGo(
         declaredToolNames.add(tool.name);
       }
 
-      for await (const event of parseEventStream(response.body)) {
+      // Re-arm the idle timer on every raw chunk: parseEventStream may buffer
+      // several lines per chunk, so chunk boundaries are the correct idle signal.
+      const rawBody = response.body.pipeThrough(
+        new TransformStream<Uint8Array, Uint8Array>({
+          transform(chunk, ctrl) {
+            armTimeout();
+            ctrl.enqueue(chunk);
+          },
+        })
+      );
+      for await (const event of parseEventStream(rawBody)) {
         if (event.type === "error") {
           const errPayload = isRecord(event.error) ? event.error : event;
           const msg =

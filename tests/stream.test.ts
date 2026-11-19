@@ -477,4 +477,125 @@ describe("streamCommandCodeGo", () => {
       expect(errorEvent.error.errorMessage).toContain("Invalid credentials");
     }
   });
+
+  // Regression for patlux/pi-commandcode-provider#87 → PR #88 (merged):
+  // timeoutMs is Pi's httpIdleTimeoutMs (default 300s). It must bound the gap
+  // between chunks, not the total wall-clock duration, or long reasoning
+  // generations that stream steadily get aborted at exactly timeoutMs.
+  test("does not abort an actively streaming response that exceeds timeoutMs overall", async () => {
+    const encoder = new TextEncoder();
+    const GAP_MS = 50;
+    const TIMEOUT_MS = 110;
+    const lines = [
+      '{"type":"text-start"}\n',
+      '{"type":"text-delta","text":"a "}\n',
+      '{"type":"text-delta","text":"b "}\n',
+      '{"type":"text-delta","text":"c "}\n',
+      '{"type":"text-delta","text":"d "}\n',
+      '{"type":"text-delta","text":"e "}\n',
+      '{"type":"text-end"}\n',
+      '{"type":"finish","finishReason":"stop"}\n',
+    ];
+    let capturedSignal: AbortSignal | undefined;
+    const queue = [...lines];
+
+    // Each pull waits GAP_MS (< TIMEOUT_MS) then checks the abort signal.
+    // Total stream time (8 * 50ms = 400ms) far exceeds TIMEOUT_MS.
+    // Integration exception (ts-no-test-timers): this test deliberately exercises
+    // real wall-clock behavior — the bug under test is a wall-clock timeout.
+    const body = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        const delay = Promise.withResolvers<void>();
+        setTimeout(delay.resolve, GAP_MS);
+        await delay.promise;
+        if (capturedSignal?.aborted) {
+          controller.error(new Error("aborted by timeout"));
+          return;
+        }
+        const next = queue.shift();
+        if (next === undefined) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(encoder.encode(next));
+      },
+    });
+    const mockFetch = async (
+      _input: string | URL | Request,
+      init?: RequestInit
+    ) => {
+      capturedSignal = init?.signal as AbortSignal | undefined;
+      return new Response(body, {
+        status: 200,
+        headers: { "content-type": "application/x-ndjson" },
+      });
+    };
+
+    const model = resolveModel("deepseek-v4-flash");
+    const stream = streamCommandCodeGo(
+      model,
+      { messages: [{ role: "user", content: "Stream a long answer" }] },
+      { apiKey: "mock_key", fetch: mockFetch, timeoutMs: TIMEOUT_MS }
+    );
+
+    const events: AssistantMessageEvent[] = [];
+    for await (const event of stream) {
+      events.push(event);
+    }
+
+    const doneEvent = events.find((e) => e.type === "done");
+    const errorEvent = events.find((e) => e.type === "error");
+    expect(errorEvent).toBeUndefined();
+    expect(doneEvent).toBeDefined();
+    if (doneEvent && doneEvent.type === "done") {
+      expect(doneEvent.reason).toBe("stop");
+    }
+  });
+
+  // Companion: a stream that never yields a chunk must still abort, so the
+  // idle timer remains a real liveness guard (not an infinite wait).
+  test("aborts a stalled stream that exceeds timeoutMs between chunks", async () => {
+    const TIMEOUT_MS = 60;
+    let capturedSignal: AbortSignal | undefined;
+    let onAbort: (() => void) | undefined;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        // no enqueue or close: stall until the idle timer aborts, then surface
+        // the rejection so parseEventStream's read can settle.
+        onAbort = () => controller.error(new Error("aborted by timeout"));
+      },
+    });
+    const mockFetch = async (
+      _input: string | URL | Request,
+      init?: RequestInit
+    ) => {
+      capturedSignal = init?.signal as AbortSignal | undefined;
+      capturedSignal?.addEventListener("abort", () => onAbort?.(), { once: true });
+      return new Response(body, {
+        status: 200,
+        headers: { "content-type": "application/x-ndjson" },
+      });
+    };
+    const model = resolveModel("deepseek-v4-flash");
+
+    const stream = streamCommandCodeGo(
+      model,
+      { messages: [{ role: "user", content: "Stall" }] },
+      { apiKey: "mock_key", fetch: mockFetch, timeoutMs: TIMEOUT_MS }
+    );
+
+    const events: AssistantMessageEvent[] = [];
+    for await (const event of stream) {
+      events.push(event);
+    }
+
+    const errorEvent = events.find((e) => e.type === "error");
+    expect(errorEvent).toBeDefined();
+    if (errorEvent && errorEvent.type === "error") {
+      // The mock's injected rejection message surfaces here; the real proof
+      // that the idle timer fired is the aborted signal asserted below.
+      expect(errorEvent.error.errorMessage).toContain("timeout");
+    }
+    expect(capturedSignal?.aborted).toBe(true);
+  });
 });
