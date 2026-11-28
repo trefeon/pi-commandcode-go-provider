@@ -20,7 +20,7 @@ describe("catalog", () => {
 
   test("contains key flagship Go models without duplicate prefixes", () => {
     const ids = COMMAND_CODE_GO_MODELS.map((m) => m.id);
-    expect(ids).toContain("inkling-2-small-free");
+    expect(ids).toContain("inkling-2-mini");
     expect(ids).toContain("glyph-cluster-free");
     expect(ids).toContain("deepseek-v4.1-flash");
     expect(ids).toContain("deepseek-v4-pro");
@@ -36,7 +36,7 @@ describe("catalog", () => {
     expect(toWireModelId("kimi-k2.7-code")).toBe("moonshotai/Kimi-K2.7-Code");
     expect(toWireModelId("minimax-m3")).toBe("MiniMaxAI/MiniMax-M3");
     expect(toWireModelId("qwen3.7-plus")).toBe("Qwen/Qwen3.7-Plus");
-    expect(toWireModelId("inkling-2-small-free")).toBe("thinkingmachines/inkling-2-small:free");
+    expect(toWireModelId("inkling-2-mini")).toBe("thinkingmachines/inkling-2-mini");
     expect(toWireModelId("glyph-cluster-free")).toBe("stealth/glyph-cluster:free");
   });
   test("provides dynamic fallback for uncatalogued models", () => {
