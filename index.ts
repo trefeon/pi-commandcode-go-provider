@@ -5,8 +5,6 @@
  * enabling full access to all 30 CommandCode Go models without requiring the $15/mo Provider API.
  */
 
-import { execSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { hasApiKey, resolveApiKey } from "./src/auth.js";
 import { COMMAND_CODE_GO_MODELS, preferredCompactionModelId, registerCatalogModels } from "./src/catalog.js";
 import { loadCachedCatalog, refreshCatalog } from "./src/dynamic-catalog.js";
@@ -14,6 +12,8 @@ import { clampMaxTokens } from "./src/protocol.js";
 import { fetchUsageOverview } from "./src/quota.js";
 import { COMMANDCODE_BUILTIN_ID, commandCodeUsageProvider } from "./src/usage.js";
 import { streamCommandCodeGo } from "./src/stream.js";
+import { autoUpdateEnabled, selfUpdate } from "./src/self-update.js";
+import { getCliVersion, refreshCliVersion } from "./src/version.js";
 import type {
   CommandCodeGoModel,
   ContextLike,
@@ -123,9 +123,12 @@ export default async function (pi: ExtensionAPI): Promise<void> {
   // Override the built-in `commandcode` usage fetcher so omp's native `/usage`
   // dashboard renders the monthly limit (built-in only shows 5h/weekly/balance).
   // Models for that id stay hidden via `disabledProviders`; only usage is overridden.
-  pi.registerProvider(COMMANDCODE_BUILTIN_ID, {
-    usage: commandCodeUsageProvider(COMMANDCODE_BUILTIN_ID),
-  });
+  // Set COMMANDCODE_GO_BUILTIN_USAGE=0 to leave the built-in `commandcode` usage fetcher untouched.
+  if (process.env.COMMANDCODE_GO_BUILTIN_USAGE !== "0") {
+    pi.registerProvider(COMMANDCODE_BUILTIN_ID, {
+      usage: commandCodeUsageProvider(COMMANDCODE_BUILTIN_ID),
+    });
+  }
   // Status command: displays configuration and active key presence safely
   if (pi.registerCommand) {
     pi.registerCommand("commandcode-go-status", {
@@ -136,6 +139,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
         const message = [
           `Provider: ${PROVIDER_NAME} (${PROVIDER_ID})`,
           `Gateway: ${GATEWAY_BASE_URL}`,
+          `CLI version header: ${getCliVersion()}`,
           `Models available: ${COMMAND_CODE_GO_MODELS.length}`,
           `API key configured: ${keyPresent ? "Yes" : "No (set COMMANDCODE_API_KEY or command-code-go-api-keys file)"}`,
           `Active model: ${activeModel}`,
@@ -252,14 +256,17 @@ export default async function (pi: ExtensionAPI): Promise<void> {
     pi.registerCommand("commandcode-go-update", {
       description: "Pull latest plugin updates from git repository",
       handler: async (_args: string, ctx: ExtensionContext) => {
-        try {
-          const moduleDir = fileURLToPath(new URL(".", import.meta.url));
-          ctx.ui?.notify("Pulling latest plugin updates from git...", "info");
-          const out = execSync("git pull --ff-only", { cwd: moduleDir, encoding: "utf-8" }).trim();
-          ctx.ui?.notify(`Plugin update: ${out}. Run /reload to apply.`, "info");
-        } catch (err) {
-          ctx.ui?.notify(`Update check failed: ${err instanceof Error ? err.message : String(err)}`, "warning");
-        }
+        ctx.ui?.notify("Updating plugin, CLI version, and model catalog...", "info");
+        const [update, cliVersion, catalog] = await Promise.all([
+          selfUpdate(),
+          refreshCliVersion(true),
+          refreshCatalog(true),
+        ]);
+        ctx.ui?.notify(
+          `Plugin: ${update.detail}${update.status === "updated" ? " (run /reload to apply)" : ""}\n` +
+            `Command Code CLI version: ${cliVersion}\nCatalog: ${catalog.models.length} models`,
+          update.status === "skipped" ? "warning" : "info",
+        );
       },
     });
   }
@@ -267,8 +274,18 @@ export default async function (pi: ExtensionAPI): Promise<void> {
   // Auto-bind model on session start if selected
   if (pi.on) {
     pi.on("session_start", async (_event: unknown, ctx: ExtensionContext) => {
+      // Background auto-update: never blocks or fails session start.
+      void (async () => {
+        await refreshCliVersion();
+        await refreshCatalog();
+        if (!autoUpdateEnabled()) return;
+        const update = await selfUpdate();
+        if (update.status === "updated") {
+          ctx.ui?.notify(`Command Code Go plugin auto-updated (${update.detail}). Run /reload to apply.`, "info");
+        }
+      })().catch(() => {});
       const provider = ctx.model?.provider;
-      if ((provider === PROVIDER_ID || provider === "commandcode") && ctx.model && ctx.modelRegistry && pi.setModel) {
+      if (provider === PROVIDER_ID && ctx.model && ctx.modelRegistry && pi.setModel) {
         const registered = ctx.modelRegistry.find(provider, ctx.model.id);
         if (registered) {
           await pi.setModel(registered);

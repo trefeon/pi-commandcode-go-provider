@@ -3,7 +3,7 @@ import { resolveModel } from "./catalog.js";
 import { createAssistantMessageEventStream } from "./event-stream.js";
 import {
   buildRequest,
-  CLI_VERSION,
+  getCliVersion,
   coerceToolInput,
   DEFAULT_GATEWAY_URL,
   dropNullArguments,
@@ -169,7 +169,7 @@ export function streamCommandCodeGo(
         authorization: `Bearer ${apiKey}`,
         "content-type": "application/json",
         accept: "text/event-stream, application/x-ndjson, text/plain",
-        "x-command-code-version": CLI_VERSION,
+        "x-command-code-version": getCliVersion(),
         "x-cli-environment": "production",
         "user-agent": "cli",
       };

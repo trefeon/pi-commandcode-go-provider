@@ -1,4 +1,4 @@
-# pi-commandcode-go-provider
+﻿# pi-commandcode-go-provider
 
 Custom provider extension for **Oh My Pi (OMP)** and **Pi coding agent** that connects to the **Command Code Go plan ($1/mo)**.
 
@@ -13,7 +13,7 @@ Command Code accounts fall into two categories:
 Command Code Go instead communicates via Command Code's internal CLI gateway:
 - **Endpoint:** `POST https://api.commandcode.ai/alpha/generate`
 - **Protocol:** Line-delimited JSON (NDJSON) streaming
-- **Headers:** `x-command-code-version: 0.26.20`, `x-cli-environment: production`, `user-agent: cli`
+- **Headers:** `x-command-code-version: 1.93.5 (auto-tracked from npm `command-code`)`, `x-cli-environment: production`, `user-agent: cli`
 
 This extension implements that wire protocol directly, allowing OMP and Pi to use the full Go-plan model catalog (60 models at the time of writing) with full tool calling, reasoning/thinking, and streaming support.
 
@@ -50,8 +50,14 @@ The provider ships `src/generated-catalog.ts`, generated from Command Code's pub
 
 1. **Runtime Refresh:** OMP queries `GET /provider/v1/models?view=client` on model refresh; Pi does the same via `refreshModels`. Newly published Go models are merged in and cached for 6 hours.
 2. **Instant In-Session Refresh:** Run `/commandcode-go-refresh` in OMP to force an immediate upstream catalog check.
-3. **In-Session Git Self-Update:** Run `/commandcode-go-update` in OMP to pull the latest code updates directly from GitHub without leaving your terminal.
+3. **Auto-Update:** On every session start the plugin refreshes the CLI version header (latest `command-code` on npm, 6h cache), the model catalog, and fast-forwards its own git checkout (skipped if dirty; set `COMMANDCODE_GO_AUTO_UPDATE=0` to disable the git pull). Run `/commandcode-go-update` to force all three now; `/reload` applies code updates.
 4. **GitHub Actions Daily Sync:** A scheduled workflow reruns `bun run scripts/generate-catalog.ts` and commits the regenerated catalog.
+---
+
+## Coexistence with OMP's built-in `commandcode` provider
+
+This extension registers its own provider id `commandcode-go` (API `commandcode-go`), so models, `/model` refs, and streaming never touch the built-in `commandcode` provider (`/provider/v1/*`, Provider-plan keys). The only shared surface is `/usage`: by default the plugin overrides the built-in `commandcode` usage fetcher to add the monthly limit. Set `COMMANDCODE_GO_BUILTIN_USAGE=0` to leave the built-in fetcher untouched. API-key lookup reads the same `COMMANDCODE_API_KEY` sources, so one key serves both.
+
 ---
 
 ## Authentication
@@ -85,9 +91,9 @@ omp --model commandcode-go/kimi-k2.7-code
 ### Extension Commands
 
 Inside OMP / Pi interactive session:
-- `/commandcode-go-status` — Displays gateway URL, API key status, model count, and active model.
-- `/commandcode-go-models` — Lists every Go-plan model with context, output cap, and reasoning efforts.
-- `/commandcode-go-quota` — Studio-style usage overview: billing-period token/run totals, credit balance (monthly/purchased/free), and 5-hour/weekly/monthly limit percentages with reset times.
+- `/commandcode-go-status` â€” Displays gateway URL, API key status, model count, and active model.
+- `/commandcode-go-models` â€” Lists every Go-plan model with context, output cap, and reasoning efforts.
+- `/commandcode-go-quota` â€” Studio-style usage overview: billing-period token/run totals, credit balance (monthly/purchased/free), and 5-hour/weekly/monthly limit percentages with reset times.
 
 ### Native `/usage` Dashboard
 
@@ -124,15 +130,15 @@ Model rows declare their effort ladders but no default level: a new session's st
 
 ## Protocol Compatibility (OMP & Pi)
 
-- **Wire protocol:** `/alpha/generate` NDJSON stream with the official CLI headers (`x-command-code-version: 0.26.20`, `x-cli-environment: production`, `user-agent: cli`).
-- **Tool schemas:** sent verbatim as `input_schema`, matching `command-code@1.89.1`'s `toWireTools` — no injected nullability hints.
+- **Wire protocol:** `/alpha/generate` NDJSON stream with the official CLI headers (`x-command-code-version: 1.93.5 (auto-tracked from npm `command-code`)`, `x-cli-environment: production`, `user-agent: cli`).
+- **Tool schemas:** sent verbatim as `input_schema`, matching `command-code@1.89.1`'s `toWireTools` â€” no injected nullability hints.
 - **Tool inputs:** official-CLI parity (`coerceToolInput`): single-element array unwrap, JSON-string parse, bare-string root wrapping, plus smashed-key repair for reasoning models.
 - **Tool results:** accepts OMP's `role: "toolResult"`, Pi's `role: "tool"`, and any message carrying a `toolCallId`, emitting one wire `tool` turn per result with the original call id and tool name.
 - **Stream parsing:** text and reasoning deltas, `tool-call` frames, usage totals, finish reasons, and mid-stream error events.
-- **Usage accounting:** upstream `inputTokens` is the whole prompt, cache hits included (`noCacheTokens + cacheReadTokens + cacheWriteTokens`). `usage.input` carries only the uncached remainder and `usage.contextTokens` the full prompt, matching the host convention (`input + cacheRead + cacheWrite`). Without this split every cache hit is counted twice and the context gauge doubles — a 570K-token prompt renders at ~105% of a 1M window.
-- **Idle timeout:** `timeoutMs` (Pi's `httpIdleTimeoutMs`, default 300s) bounds the gap between stream chunks, not total generation time. The timer re-arms on every raw chunk, so long reasoning turns that stream steadily are not cut off at exactly `timeoutMs`; a genuinely stalled stream still aborts. Ported from patlux/pi-commandcode-provider#87 → PR #88.
-- **Output budget:** `max_tokens` uses each model's upstream declared cap, or the full gateway ceiling (200,000) when upstream declares none. The gateway hard-rejects anything above 200,000 — verified against models that declare 256K/262K — so 200K is the highest the endpoint accepts. If upstream ever reports a lower cap in a 400, the request retries once with that value.
-- **Compaction:** every registered model carries a `compactionModel` reference resolved by `preferredCompactionModelId()` — picked from the upstream price list at the compaction workload (500K in / 8K out): 1M+ window required (the target must read the oversized context), free/stealth-preview rows excluded (capacity-gated, refuse under load — the failure that motivated this), then cheapest tier-aware cost using the upstream `contextTiers` the catalog carries. Flat base rates mislead: `gpt-6-luna` is 0.10/M base but 0.20/M above 272K, and `qwen3.7-flash`'s 0.03 is its ≤32K tier (0.20/M above 256K) — both lose to `muse-spark-1.2-contributor`'s 0.10/0.20 flat. The compaction reference resolves before the session model; a withdrawn upstream id degrades gracefully back to it.
+- **Usage accounting:** upstream `inputTokens` is the whole prompt, cache hits included (`noCacheTokens + cacheReadTokens + cacheWriteTokens`). `usage.input` carries only the uncached remainder and `usage.contextTokens` the full prompt, matching the host convention (`input + cacheRead + cacheWrite`). Without this split every cache hit is counted twice and the context gauge doubles â€” a 570K-token prompt renders at ~105% of a 1M window.
+- **Idle timeout:** `timeoutMs` (Pi's `httpIdleTimeoutMs`, default 300s) bounds the gap between stream chunks, not total generation time. The timer re-arms on every raw chunk, so long reasoning turns that stream steadily are not cut off at exactly `timeoutMs`; a genuinely stalled stream still aborts. Ported from patlux/pi-commandcode-provider#87 â†’ PR #88.
+- **Output budget:** `max_tokens` uses each model's upstream declared cap, or the full gateway ceiling (200,000) when upstream declares none. The gateway hard-rejects anything above 200,000 â€” verified against models that declare 256K/262K â€” so 200K is the highest the endpoint accepts. If upstream ever reports a lower cap in a 400, the request retries once with that value.
+- **Compaction:** every registered model carries a `compactionModel` reference resolved by `preferredCompactionModelId()` â€” picked from the upstream price list at the compaction workload (500K in / 8K out): 1M+ window required (the target must read the oversized context), free/stealth-preview rows excluded (capacity-gated, refuse under load â€” the failure that motivated this), then cheapest tier-aware cost using the upstream `contextTiers` the catalog carries. Flat base rates mislead: `gpt-6-luna` is 0.10/M base but 0.20/M above 272K, and `qwen3.7-flash`'s 0.03 is its â‰¤32K tier (0.20/M above 256K) â€” both lose to `muse-spark-1.2-contributor`'s 0.10/0.20 flat. The compaction reference resolves before the session model; a withdrawn upstream id degrades gracefully back to it.
 
 ---
 

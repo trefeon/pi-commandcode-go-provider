@@ -4,3 +4,5 @@ dist/
 .env
 command-code-go-api-keys
 reference/
+
+.cli-version-cache.json

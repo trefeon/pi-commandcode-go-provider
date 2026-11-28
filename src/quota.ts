@@ -1,5 +1,6 @@
 import { resolveApiKey } from "./auth.js";
 import { isRecord } from "./types.js";
+import { getCliVersion } from "./version.js";
 
 const BASE_URL = "https://api.commandcode.ai";
 const TIMEOUT_MS = 15_000;
@@ -72,7 +73,7 @@ async function fetchAlphaJson(path: string, apiKeyOverride?: string): Promise<Re
         authorization: `Bearer ${apiKey}`,
         "content-type": "application/json",
         accept: "application/json",
-        "x-command-code-version": "0.26.20",
+        "x-command-code-version": getCliVersion(),
         "user-agent": "cli",
       },
       signal: AbortSignal.timeout(TIMEOUT_MS),

@@ -2,7 +2,7 @@ import { isRecord, type ContextLike, type JsonObject, type MessageLike, type Str
 import { toWireModelId } from "./catalog.js";
 
 export const DEFAULT_GATEWAY_URL = "https://api.commandcode.ai/alpha/generate";
-export const CLI_VERSION = "0.26.20";
+export { getCliVersion } from "./version.js";
 export const DEFAULT_MAX_TOKENS = 64_000;
 /** Hard upstream ceiling: `/alpha/generate` rejects params.max_tokens above this. */
 export const MAX_OUTPUT_TOKENS = 200_000;

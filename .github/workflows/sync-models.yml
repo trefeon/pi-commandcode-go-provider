@@ -26,13 +26,16 @@ jobs:
       - name: Regenerate Go-plan catalog
         run: bun run scripts/generate-catalog.ts
 
+      - name: Sync Command Code CLI version
+        run: bun run scripts/sync-cli-version.ts
+
       - name: Commit and push changes if modified
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           if [[ -n $(git status -s) ]]; then
-            git add src/generated-catalog.ts
-            git commit -m "chore(models): sync Go-plan catalog from upstream [skip ci]"
+            git add src/generated-catalog.ts src/version.ts
+            git commit -m "chore(sync): update Go-plan catalog and CLI version from upstream [skip ci]"
             git push
           else
             echo "Catalog is already up to date."

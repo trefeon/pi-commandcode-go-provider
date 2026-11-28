@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { resolveApiKey } from "./auth.js";
 import { COMMAND_CODE_GO_MODELS, registerCatalogModels } from "./catalog.js";
-import { clampMaxTokens, CLI_VERSION, MAX_OUTPUT_TOKENS } from "./protocol.js";
+import { clampMaxTokens, getCliVersion, MAX_OUTPUT_TOKENS } from "./protocol.js";
 import type { CommandCodeGoModel, ModelCost } from "./types.js";
 import { isRecord } from "./types.js";
 
@@ -180,7 +180,7 @@ export async function refreshCatalog(force = false): Promise<{
     const res = await fetch(DEFAULT_MODELS_URL, {
       headers: {
         accept: "application/json",
-        "x-command-code-version": CLI_VERSION,
+        "x-command-code-version": getCliVersion(),
         "user-agent": "cli",
         ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
       },
